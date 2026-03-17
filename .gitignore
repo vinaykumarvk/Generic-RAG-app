@@ -1,0 +1,28 @@
+node_modules
+**/node_modules
+**/dist
+**/.env
+.env
+.DS_Store
+*.log
+
+# Vite
+apps/*/dist
+apps/*/.vite
+
+# Terraform
+**/.terraform
+*.tfstate
+*.tfstate.*
+*.tfvars
+
+# Uploads and generated outputs
+uploads/
+outputs/
+
+# Test artifacts
+test-results/
+playwright-report/
+
+# Bundle reports
+frontend-bundle-report.json

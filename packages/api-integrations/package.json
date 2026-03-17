@@ -1,0 +1,29 @@
+{
+  "name": "@puda/api-integrations",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "docx": "^9.4.1",
+    "pdfkit": "^0.16.0"
+  },
+  "peerDependencies": {
+    "pg": "^8.11.0"
+  },
+  "devDependencies": {
+    "@types/archiver": "^6.0.3",
+    "@types/node": "^22.10.2",
+    "@types/pdfkit": "^0.13.9",
+    "@types/pg": "^8.10.9",
+    "pg": "^8.11.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.0"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "@puda/api-core",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/compress": "^8.3.1",
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/cors": "^11.2.0",
+    "@fastify/helmet": "^12.0.0",
+    "@fastify/rate-limit": "^10.3.0",
+    "@fastify/swagger": "^9.6.0",
+    "@fastify/swagger-ui": "^5.2.2",
+    "argon2": "^0.44.0",
+    "jose": "^6.0.11",
+    "jsonwebtoken": "^9.0.3"
+  },
+  "peerDependencies": {
+    "fastify": "^5.0.0",
+    "pg": "^8.11.0"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.10.9",
+    "fastify": "^5.7.4",
+    "pg": "^8.11.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.0"
+  }
+}

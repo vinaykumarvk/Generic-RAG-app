@@ -1,0 +1,8 @@
+project_id                     = "my-gcp-project"
+region                         = "asia-south1"
+name_prefix                    = "puda"
+api_service_name               = "puda-api"
+api_image                      = "gcr.io/my-gcp-project/puda-api:latest"
+allowed_origins                = "https://citizen.example.gov.in,https://officer.example.gov.in"
+jwt_secret                     = "replace-with-strong-secret"
+payment_gateway_webhook_secret = "replace-with-webhook-secret"

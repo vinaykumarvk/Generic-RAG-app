@@ -1,0 +1,47 @@
+# Git
+.git
+.gitignore
+
+# Node modules (reinstalled in container)
+node_modules
+**/node_modules
+
+# Build artifacts (rebuilt in container)
+**/dist
+apps/*/.vite
+
+# Environment files (injected via Cloud Run)
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.DS_Store
+.vscode
+.cursor
+.idea
+*.swp
+*.swo
+
+# Test and docs (not needed in production image)
+e2e/
+**/*.test.ts
+**/*.spec.ts
+**/*.md
+*.md
+*.docx.md
+
+# Large artifacts that shouldn't be in the image
+outputs/
+uploads/
+
+# AI / tooling
+.claude/
+
+# Documentation (not needed in production image)
+docs/
+
+# Misc
+*.log
+coverage/
+.nyc_output/

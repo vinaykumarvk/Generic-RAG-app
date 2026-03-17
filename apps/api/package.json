@@ -1,0 +1,29 @@
+{
+  "name": "@intellirag/api",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "migrate": "tsx src/migrate-runner.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/multipart": "^9.0.0",
+    "@puda/api-core": "*",
+    "@puda/api-integrations": "*",
+    "@puda/shared": "*",
+    "@puda/workflow-engine": "*",
+    "fastify": "^5.0.0",
+    "pg": "^8.11.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.10.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.9"
+  }
+}

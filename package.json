@@ -1,0 +1,35 @@
+{
+  "name": "intellirag",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm --workspace apps/api run dev",
+    "dev:web": "npm --workspace apps/web run dev",
+    "build:shared": "npm --workspace packages/shared run build",
+    "build:workflow-engine": "npm --workspace packages/workflow-engine run build",
+    "build:api-core": "npm --workspace packages/api-core run build",
+    "build:api-integrations": "npm --workspace packages/api-integrations run build",
+    "build:packages": "npm run build:shared && npm run build:workflow-engine && npm run build:api-core && npm run build:api-integrations",
+    "build:api": "npm run build:packages && npm --workspace apps/api run build",
+    "build:web": "npm --workspace apps/web run build",
+    "build:all": "npm run build:packages && npm run build:api && npm run build:web",
+    "typecheck": "npm --workspace packages/shared run typecheck && npm --workspace packages/workflow-engine run typecheck && npm --workspace packages/api-core run typecheck && npm --workspace packages/api-integrations run typecheck && npm --workspace apps/api run typecheck",
+    "test:workflow-engine": "npm --workspace packages/workflow-engine run test",
+    "test:api": "npm --workspace apps/api run test",
+    "test:e2e": "playwright test --config=e2e/playwright.a11y.config.ts",
+    "test:e2e:a11y": "playwright test --config=e2e/playwright.a11y.config.ts",
+    "test:api:load": "npm --workspace apps/api run test:load",
+    "clean": "rm -rf apps/*/dist apps/*/.vite packages/*/dist",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:build": "docker compose build",
+    "docker:logs": "docker compose logs -f"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.1",
+    "@playwright/test": "^1.58.1"
+  }
+}

@@ -1,0 +1,90 @@
+rule_files:
+  - prometheus-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: fast burn-rate pages when sustained critical errors
+    interval: 1m
+    input_series:
+      - series: 'intellirag_api_http_requests_total'
+        values: '0+100x180'
+      - series: 'intellirag_api_http_errors_total'
+        values: '0+10x180'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: IntelliRagApiSloErrorBudgetBurnFast
+        exp_alerts:
+          - exp_labels:
+              alertname: IntelliRagApiSloErrorBudgetBurnFast
+              severity: page
+              service: intellirag-api
+              slo: availability
+              burn_window: fast
+            exp_annotations:
+              summary: "IntelliRAG API fast burn-rate alert (error budget)"
+              description: "Availability error-budget burn is critically high across 5m/30m windows."
+              runbook: "ops/runbooks/auth-outage.md"
+      - eval_time: 40m
+        alertname: IntelliRagApiSloErrorBudgetBurnSlow
+        exp_alerts: []
+
+  - name: slow burn-rate warns on sustained elevated errors
+    interval: 1m
+    input_series:
+      - series: 'intellirag_api_http_requests_total'
+        values: '0+100x500'
+      - series: 'intellirag_api_http_errors_total'
+        values: '0+4x500'
+    alert_rule_test:
+      - eval_time: 6h45m
+        alertname: IntelliRagApiSloErrorBudgetBurnSlow
+        exp_alerts:
+          - exp_labels:
+              alertname: IntelliRagApiSloErrorBudgetBurnSlow
+              severity: warning
+              service: intellirag-api
+              slo: availability
+              burn_window: slow
+            exp_annotations:
+              summary: "IntelliRAG API slow burn-rate alert (error budget)"
+              description: "Availability error-budget burn is elevated across 30m/6h windows."
+              runbook: "ops/runbooks/auth-outage.md"
+      - eval_time: 6h45m
+        alertname: IntelliRagApiSloErrorBudgetBurnFast
+        exp_alerts: []
+
+  - name: healthy error rate does not trigger burn alerts
+    interval: 1m
+    input_series:
+      - series: 'intellirag_api_http_requests_total'
+        values: '0+100x500'
+      - series: 'intellirag_api_http_errors_total'
+        values: '0+1x500'
+    alert_rule_test:
+      - eval_time: 6h45m
+        alertname: IntelliRagApiSloErrorBudgetBurnFast
+        exp_alerts: []
+      - eval_time: 6h45m
+        alertname: IntelliRagApiSloErrorBudgetBurnSlow
+        exp_alerts: []
+
+  - name: legacy high-error alert still pages
+    interval: 1m
+    input_series:
+      - series: 'intellirag_api_http_requests_total'
+        values: '0+100x180'
+      - series: 'intellirag_api_http_errors_total'
+        values: '0+2x180'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: IntelliRagApiHighErrorRate
+        exp_alerts:
+          - exp_labels:
+              alertname: IntelliRagApiHighErrorRate
+              severity: page
+              service: intellirag-api
+            exp_annotations:
+              summary: "IntelliRAG API error rate > 1% for 10m"
+              description: "5xx error ratio exceeded SLO threshold."
+              runbook: "ops/runbooks/auth-outage.md"

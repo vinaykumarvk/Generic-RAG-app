@@ -1,0 +1,130 @@
+groups:
+  - name: intellirag-api-operability
+    rules:
+      - alert: IntelliRagApiHighErrorRate
+        expr: |
+          (
+            sum(rate(intellirag_api_http_errors_total[5m]))
+            /
+            clamp_min(sum(rate(intellirag_api_http_requests_total[5m])), 1)
+          ) > 0.01
+        for: 10m
+        labels:
+          severity: page
+          service: intellirag-api
+        annotations:
+          summary: "IntelliRAG API error rate > 1% for 10m"
+          description: "5xx error ratio exceeded SLO threshold."
+          runbook: "ops/runbooks/api-high-error-rate.md"
+
+      - alert: IntelliRagApiSloErrorBudgetBurnFast
+        expr: |
+          (
+            (
+              sum(rate(intellirag_api_http_errors_total[5m]))
+              /
+              clamp_min(sum(rate(intellirag_api_http_requests_total[5m])), 1)
+            ) > 0.072
+          )
+          and
+          (
+            (
+              sum(rate(intellirag_api_http_errors_total[30m]))
+              /
+              clamp_min(sum(rate(intellirag_api_http_requests_total[30m])), 1)
+            ) > 0.072
+          )
+        for: 2m
+        labels:
+          severity: page
+          service: intellirag-api
+          slo: availability
+          burn_window: fast
+        annotations:
+          summary: "IntelliRAG API fast burn-rate alert (error budget)"
+          description: "Availability error-budget burn is critically high across 5m/30m windows."
+          runbook: "ops/runbooks/api-high-error-rate.md"
+
+      - alert: IntelliRagApiSloErrorBudgetBurnSlow
+        expr: |
+          (
+            (
+              sum(rate(intellirag_api_http_errors_total[30m]))
+              /
+              clamp_min(sum(rate(intellirag_api_http_requests_total[30m])), 1)
+            ) > 0.03
+          )
+          and
+          (
+            (
+              sum(rate(intellirag_api_http_errors_total[6h]))
+              /
+              clamp_min(sum(rate(intellirag_api_http_requests_total[6h])), 1)
+            ) > 0.03
+          )
+        for: 15m
+        labels:
+          severity: warning
+          service: intellirag-api
+          slo: availability
+          burn_window: slow
+        annotations:
+          summary: "IntelliRAG API slow burn-rate alert (error budget)"
+          description: "Availability error-budget burn is elevated across 30m/6h windows."
+          runbook: "ops/runbooks/api-high-error-rate.md"
+
+      - alert: IntelliRagApiHighLatencyP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(intellirag_api_http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 1.5
+        for: 10m
+        labels:
+          severity: page
+          service: intellirag-api
+        annotations:
+          summary: "IntelliRAG API p95 latency above 1.5s"
+          description: "Sustained latency regression affecting user workflows."
+          runbook: "ops/runbooks/db-degradation.md"
+
+      - alert: IntelliRagApiDbPoolSaturation
+        expr: intellirag_api_db_pool_waiting_clients > 5
+        for: 5m
+        labels:
+          severity: page
+          service: intellirag-api
+        annotations:
+          summary: "Postgres pool saturation in IntelliRAG API"
+          description: "Pool waiting clients sustained > 5."
+          runbook: "ops/runbooks/db-degradation.md"
+
+      - alert: IntelliRagApiWorkflowOverdueBacklog
+        expr: intellirag_api_workflow_backlog_overdue_tasks > 25
+        for: 10m
+        labels:
+          severity: warning
+          service: intellirag-api
+        annotations:
+          summary: "Workflow overdue backlog is elevated"
+          description: "Overdue tasks exceeded threshold; check workflow stuck states."
+          runbook: "ops/runbooks/workflow-stuck-states.md"
+
+      - alert: IntelliRagApiAuthLoginFailuresSpike
+        expr: |
+          sum(
+            rate(
+              intellirag_api_http_requests_total{
+                route="/api/v1/auth/login",
+                status_code=~"401|500"
+              }[5m]
+            )
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+          service: intellirag-api
+        annotations:
+          summary: "Login failure spike detected"
+          description: "Sustained auth/login failures above normal baseline."
+          runbook: "ops/runbooks/auth-outage.md"

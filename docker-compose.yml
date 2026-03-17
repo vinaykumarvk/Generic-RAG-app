@@ -1,0 +1,113 @@
+services:
+  # --- PostgreSQL + pgvector ---
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: intellirag-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: intellirag
+      POSTGRES_USER: intellirag
+      POSTGRES_PASSWORD: intellirag
+    ports:
+      - "5432:5432"
+    volumes:
+      - intellirag_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U intellirag"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+
+  # --- Ollama (local LLM) ---
+  ollama:
+    image: ollama/ollama:latest
+    container_name: intellirag-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - intellirag_ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          memory: 4G
+    networks:
+      - backend
+
+  # --- Fastify API ---
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: intellirag-api
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: development
+      API_PORT: "3001"
+      API_HOST: "0.0.0.0"
+      DATABASE_URL: postgres://intellirag:intellirag@postgres:5432/intellirag
+      DATABASE_SSL: "false"
+      JWT_SECRET: "${INTELLIRAG_JWT_SECRET:-intellirag-local-dev-secret-change-me}"
+      ALLOWED_ORIGINS: "http://localhost:5173,http://localhost:3000"
+      STORAGE_BASE_DIR: /app/uploads
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_CHAT_MODEL: "${OLLAMA_CHAT_MODEL:-qwen3:35b}"
+      OLLAMA_EMBEDDING_MODEL: "${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}"
+    volumes:
+      - intellirag_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+      - frontend
+
+  # --- Python Worker (ingestion pipeline) ---
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    container_name: intellirag-worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://intellirag:intellirag@postgres:5432/intellirag
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_EMBEDDING_MODEL: "${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}"
+      STORAGE_BASE_DIR: /app/uploads
+      WORKER_POLL_INTERVAL_S: "2"
+      WORKER_BATCH_SIZE: "5"
+    volumes:
+      - intellirag_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+
+  # --- React Frontend (nginx) ---
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:3001
+    container_name: intellirag-web
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    networks:
+      - frontend
+
+networks:
+  backend:
+    internal: true
+  frontend:
+
+volumes:
+  intellirag_pg_data:
+  intellirag_ollama_data:
+  intellirag_uploads:
