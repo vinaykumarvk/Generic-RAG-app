@@ -5,9 +5,9 @@ services:
     container_name: intellirag-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: intellirag
-      POSTGRES_USER: intellirag
-      POSTGRES_PASSWORD: intellirag
+      POSTGRES_DB: ${POSTGRES_DB:-intellirag}
+      POSTGRES_USER: ${POSTGRES_USER:-intellirag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-intellirag}
     ports:
       - "5432:5432"
     volumes:
@@ -49,9 +49,9 @@ services:
       NODE_ENV: development
       API_PORT: "3001"
       API_HOST: "0.0.0.0"
-      DATABASE_URL: postgres://intellirag:intellirag@postgres:5432/intellirag
+      DATABASE_URL: ${DATABASE_URL:-postgres://intellirag:intellirag@postgres:5432/intellirag}
       DATABASE_SSL: "false"
-      JWT_SECRET: "${INTELLIRAG_JWT_SECRET:-intellirag-local-dev-secret-change-me}"
+      JWT_SECRET: "${INTELLIRAG_JWT_SECRET:?Set INTELLIRAG_JWT_SECRET in .env}"
       ALLOWED_ORIGINS: "http://localhost:5173,http://localhost:3000"
       STORAGE_BASE_DIR: /app/uploads
       OLLAMA_BASE_URL: http://ollama:11434
@@ -59,6 +59,11 @@ services:
       OLLAMA_EMBEDDING_MODEL: "${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}"
     volumes:
       - intellirag_uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     depends_on:
       postgres:
         condition: service_healthy
@@ -74,7 +79,7 @@ services:
     container_name: intellirag-worker
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://intellirag:intellirag@postgres:5432/intellirag
+      DATABASE_URL: ${DATABASE_URL:-postgres://intellirag:intellirag@postgres:5432/intellirag}
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_EMBEDDING_MODEL: "${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}"
       STORAGE_BASE_DIR: /app/uploads
@@ -82,6 +87,11 @@ services:
       WORKER_BATCH_SIZE: "5"
     volumes:
       - intellirag_uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     depends_on:
       postgres:
         condition: service_healthy

@@ -15,7 +15,7 @@ export function Sidebar() {
         <p className="text-xs text-gray-400 mt-1">Knowledge Platform</p>
       </div>
 
-      <nav className="flex-1 p-3 space-y-1">
+      <nav className="flex-1 p-3 space-y-1" aria-label="Main navigation">
         <NavLink
           to="/"
           end

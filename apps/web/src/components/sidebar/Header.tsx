@@ -21,8 +21,9 @@ export function Header() {
           onClick={logout}
           className="text-gray-400 hover:text-gray-600 transition-colors"
           title="Logout"
+          aria-label="Logout"
         >
-          <LogOut size={18} />
+          <LogOut size={18} aria-hidden="true" />
         </button>
       </div>
     </header>

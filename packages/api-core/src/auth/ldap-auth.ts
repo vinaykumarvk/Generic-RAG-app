@@ -52,6 +52,10 @@ export function createLdapAuth(config: LdapAuthConfig, queryFn: QueryFn): LdapAu
       logWarn("LDAP_STUB_BLOCKED", { message: "LDAP stub authentication blocked in production — configure real LDAP provider" });
       return { success: false, error: "LDAP stub not allowed in production" };
     }
+    if (process.env.LDAP_STUB_ALLOWED !== "true") {
+      logWarn("LDAP_STUB_BLOCKED", { message: "LDAP stub authentication requires LDAP_STUB_ALLOWED=true" });
+      return { success: false, error: "LDAP stub not enabled — set LDAP_STUB_ALLOWED=true in development" };
+    }
     logWarn("LDAP_STUB_MODE", { message: "Using stub LDAP implementation — replace with real ldapjs bind in production" });
 
     try {

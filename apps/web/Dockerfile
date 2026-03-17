@@ -10,10 +10,10 @@ RUN npm ci --workspace=apps/web --include-workspace-root
 COPY apps/web/ apps/web/
 RUN cd apps/web && VITE_API_BASE_URL=${VITE_API_BASE_URL} npx vite build
 
-# --- Serve with nginx ---
-FROM nginx:alpine
+# --- Serve with nginx (non-root) ---
+FROM nginxinc/nginx-unprivileged:alpine
 COPY --from=builder /app/apps/web/dist /usr/share/nginx/html
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
 
-EXPOSE 80
+EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]

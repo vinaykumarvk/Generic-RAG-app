@@ -97,7 +97,11 @@ export function createWorkspaceRoutes(app: FastifyInstance, deps: WorkspaceRoute
     if (name !== undefined) { fields.push(`name = $${idx++}`); values.push(name); }
     if (description !== undefined) { fields.push(`description = $${idx++}`); values.push(description); }
     if (settings !== undefined) { fields.push(`settings = settings || $${idx++}::jsonb`); values.push(JSON.stringify(settings)); }
-    if (status !== undefined) { fields.push(`status = $${idx++}`); values.push(status); }
+    if (status !== undefined) {
+      const allowedStatuses = ["ACTIVE", "ARCHIVED", "SUSPENDED"];
+      if (!allowedStatuses.includes(status)) return send400(reply, `Invalid status. Must be one of: ${allowedStatuses.join(", ")}`);
+      fields.push(`status = $${idx++}`); values.push(status);
+    }
 
     if (fields.length === 0) return send400(reply, "No fields to update");
 

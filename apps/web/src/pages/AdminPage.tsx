@@ -22,12 +22,12 @@ export function AdminPage() {
 
   const { data: providers, isLoading } = useQuery({
     queryKey: ["llm-providers"],
-    queryFn: () => apiFetch<{ providers: LlmProviderConfig[] }>("/api/v1/admin/llm/providers").then((r) => r.providers),
+    queryFn: () => apiFetch<{ providers: LlmProviderConfig[] }>("/api/v1/assistant/llm/providers").then((r) => r.providers),
     enabled: isAdmin,
   });
 
   const testMutation = useMutation({
-    mutationFn: (configId: string) => apiPost<{ success: boolean; latencyMs: number; error?: string }>(`/api/v1/admin/llm/test`, { config_id: configId }),
+    mutationFn: (configId: string) => apiPost<{ success: boolean; latencyMs: number; error?: string }>(`/api/v1/assistant/llm/test`, { config_id: configId }),
   });
 
   const [testResults, setTestResults] = useState<Record<string, { success: boolean; latencyMs: number; error?: string }>>({});

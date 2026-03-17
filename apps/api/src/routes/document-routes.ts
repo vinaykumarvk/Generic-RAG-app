@@ -8,7 +8,6 @@ import type { QueryFn, GetClientFn, LlmProvider } from "@puda/api-core";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { pipeline } from "node:stream/promises";
 
 export interface DocumentRouteDeps {
   queryFn: QueryFn;

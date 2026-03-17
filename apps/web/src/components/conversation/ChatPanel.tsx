@@ -172,8 +172,9 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
             onClick={handleSend}
             disabled={!input.trim() || queryMutation.isPending}
             className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+            aria-label="Send message"
           >
-            <Send size={16} />
+            <Send size={16} aria-hidden="true" />
           </button>
         </div>
       </div>

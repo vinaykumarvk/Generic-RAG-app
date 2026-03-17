@@ -33,9 +33,11 @@ export interface NlQueryRouteDeps {
 }
 
 const SELECT_ONLY_RE = /^\s*(SELECT|WITH)\b/i;
-const DANGEROUS_RE = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|GRANT|REVOKE|EXEC|EXECUTE)\b/i;
+const DANGEROUS_RE = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|GRANT|REVOKE|EXEC|EXECUTE|COPY|CALL|DO|SET|INTO\s+OUTFILE|INTO\s+DUMPFILE)\b/i;
 /** Reject multi-statement queries (semicolons followed by non-whitespace) to prevent stacked injections */
 const MULTI_STATEMENT_RE = /;\s*\S/;
+/** Block SELECT INTO which can write data */
+const SELECT_INTO_RE = /\bSELECT\b[^;]*\bINTO\b/i;
 
 export function createNlQueryRoutes(deps: NlQueryRouteDeps) {
   const { queryFn, llmProvider, queryPatterns, dbSchemaContext, appId, scopeRestrictions, getUser = (r: any) => r.authUser || r.user } = deps;
@@ -173,15 +175,23 @@ ${scopeClause ? `- Always apply this scope filter: ${scopeClause}` : ""}
       const { sql, summary, citations } = result.data;
 
       // Sanitize SQL — reject non-SELECT, DML keywords, and multi-statement queries
-      if (!SELECT_ONLY_RE.test(sql) || DANGEROUS_RE.test(sql) || MULTI_STATEMENT_RE.test(sql)) {
+      if (!SELECT_ONLY_RE.test(sql) || DANGEROUS_RE.test(sql) || MULTI_STATEMENT_RE.test(sql) || SELECT_INTO_RE.test(sql)) {
         logWarn("LLM generated unsafe SQL, blocking", { sql: sql.slice(0, 200) });
         return null;
       }
 
       // Strip any trailing semicolons to prevent statement stacking
       const safeSql = sql.replace(/;\s*$/, "");
-      const queryResult = await queryFn(safeSql);
-      return { sql, summary, citations, data: queryResult.rows };
+      // Execute in a read-only transaction to prevent any data modification
+      await queryFn("BEGIN TRANSACTION READ ONLY");
+      try {
+        const queryResult = await queryFn(safeSql);
+        await queryFn("COMMIT");
+        return { sql, summary, citations, data: queryResult.rows };
+      } catch (err) {
+        await queryFn("ROLLBACK").catch(() => {});
+        throw err;
+      }
     }
 
     async function logQuery(

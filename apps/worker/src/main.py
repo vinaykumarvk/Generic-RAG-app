@@ -1,8 +1,10 @@
 """IntelliRAG Worker — FastAPI health + job poller."""
 
 import logging
+import signal
 import threading
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from .job_poller import run_poller
 from .db import get_pool
 
@@ -15,6 +17,9 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="IntelliRAG Worker", version="0.1.0")
 
 
+shutdown_event = threading.Event()
+
+
 @app.on_event("startup")
 async def startup():
     logger.info("Starting IntelliRAG worker...")
@@ -22,6 +27,14 @@ async def startup():
     thread = threading.Thread(target=run_poller, daemon=True)
     thread.start()
     logger.info("Job poller thread started")
+
+    # Register graceful shutdown handlers
+    def handle_signal(signum, frame):
+        logger.info(f"Received signal {signum}, shutting down gracefully...")
+        shutdown_event.set()
+
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
 
 
 @app.get("/health")
@@ -39,5 +52,5 @@ async def ready():
         cur.close()
         pool.putconn(conn)
         return {"status": "ok"}
-    except Exception as e:
-        return {"status": "degraded", "reason": str(e)}
+    except Exception:
+        return JSONResponse(status_code=503, content={"status": "degraded", "reason": "database_unreachable"})
