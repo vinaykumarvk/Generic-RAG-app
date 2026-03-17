@@ -217,13 +217,24 @@ export async function executeRetrievalPipeline(
     [conversationId]
   );
 
-  // Save citations
-  for (const citation of genResult.citations) {
+  // Save citations (batch insert)
+  if (genResult.citations.length > 0) {
+    const citationValues: unknown[] = [];
+    const citationPlaceholders: string[] = [];
+    let paramIdx = 1;
+    for (const citation of genResult.citations) {
+      citationPlaceholders.push(
+        `($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`
+      );
+      citationValues.push(
+        messageId, citation.chunk_id, citation.document_id, citation.document_title,
+        citation.page_number, citation.excerpt, citation.relevance_score, citation.citation_index
+      );
+    }
     await queryFn(
       `INSERT INTO citation (message_id, chunk_id, document_id, document_title, page_number, excerpt, relevance_score, citation_index)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [messageId, citation.chunk_id, citation.document_id, citation.document_title,
-       citation.page_number, citation.excerpt, citation.relevance_score, citation.citation_index]
+       VALUES ${citationPlaceholders.join(", ")}`,
+      citationValues
     );
   }
 

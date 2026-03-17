@@ -3,7 +3,8 @@
  */
 
 import { FastifyInstance } from "fastify";
-import { send400, send404 } from "@puda/api-core";
+import { send400, send404, sendError } from "@puda/api-core";
+import { logError } from "@puda/api-core";
 import type { QueryFn, GetClientFn, LlmProvider } from "@puda/api-core";
 import { executeRetrievalPipeline } from "../retrieval/pipeline";
 
@@ -32,22 +33,27 @@ export function createRagRoutes(app: FastifyInstance, deps: RagRouteDeps) {
         return send400(reply, "question is required");
       }
 
-      const result = await executeRetrievalPipeline(
-        { queryFn, llmProvider },
-        {
-          question: question.trim(),
-          workspaceId: wid,
-          conversationId: conversation_id,
-          userId: request.authUser!.userId,
-          preset: preset || "balanced",
-          filters: filters ? {
-            categories: filters.categories,
-            documentIds: filters.document_ids,
-          } : undefined,
-        },
-      );
+      try {
+        const result = await executeRetrievalPipeline(
+          { queryFn, llmProvider },
+          {
+            question: question.trim(),
+            workspaceId: wid,
+            conversationId: conversation_id,
+            userId: request.authUser!.userId,
+            preset: preset || "balanced",
+            filters: filters ? {
+              categories: filters.categories,
+              documentIds: filters.document_ids,
+            } : undefined,
+          },
+        );
 
-      return result;
+        return result;
+      } catch (err) {
+        logError("RAG pipeline failed", { error: err instanceof Error ? err.message : String(err), workspaceId: wid });
+        return sendError(reply, 500, "PIPELINE_ERROR", "Failed to process query. Please try again.");
+      }
     }
   );
 
@@ -130,8 +136,8 @@ export function createRagRoutes(app: FastifyInstance, deps: RagRouteDeps) {
       const { wid, id } = request.params;
 
       const convResult = await queryFn(
-        `SELECT * FROM conversation WHERE conversation_id = $1 AND workspace_id = $2`,
-        [id, wid]
+        `SELECT * FROM conversation WHERE conversation_id = $1 AND workspace_id = $2 AND user_id = $3`,
+        [id, wid, request.authUser!.userId]
       );
       if (convResult.rows.length === 0) return send404(reply, "Conversation not found");
 
@@ -164,8 +170,8 @@ export function createRagRoutes(app: FastifyInstance, deps: RagRouteDeps) {
     async (request, reply) => {
       const { wid, id } = request.params;
       const result = await queryFn(
-        `DELETE FROM conversation WHERE conversation_id = $1 AND workspace_id = $2 RETURNING conversation_id`,
-        [id, wid]
+        `DELETE FROM conversation WHERE conversation_id = $1 AND workspace_id = $2 AND user_id = $3 RETURNING conversation_id`,
+        [id, wid, request.authUser!.userId]
       );
       if (result.rows.length === 0) return send404(reply, "Conversation not found");
       return { deleted: true };

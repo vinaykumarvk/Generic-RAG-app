@@ -22,6 +22,7 @@ import { createGraphRoutes } from "./routes/graph-routes";
 import { createFeedbackRoutes } from "./routes/feedback-routes";
 import { createAnalyticsRoutes } from "./routes/analytics-routes";
 import { createExportRoutes } from "./routes/export-routes";
+import { createWorkspaceMemberGuard } from "./middleware/workspace-guard";
 
 async function main() {
   const pool = new Pool({
@@ -34,7 +35,12 @@ async function main() {
     await runMigrations(pool);
     logInfo("Migrations completed");
   } catch (err) {
-    logError("Migration failed, starting anyway", { error: String(err) });
+    logError("Migration failed", { error: String(err) });
+    if (process.env.NODE_ENV === "production") {
+      console.error("Fatal: migration failure in production, aborting startup");
+      process.exit(1);
+    }
+    logWarn("Migration failed in non-production, continuing anyway");
   }
 
   const queryFn = async (text: string, params?: unknown[]) => {
@@ -76,6 +82,11 @@ async function main() {
     domainRoutes: async (app) => {
       const deps = { queryFn, getClient, llmProvider };
       await app.register(import("@fastify/multipart"), { limits: { fileSize: 52_428_800 } });
+
+      // Register workspace membership guard for all /workspaces/:wid/* sub-routes
+      const workspaceMemberGuard = createWorkspaceMemberGuard(queryFn);
+      app.addHook("preHandler", workspaceMemberGuard);
+
       createWorkspaceRoutes(app, deps);
       createUserRoutes(app, deps);
       createDocumentRoutes(app, deps);
@@ -92,6 +103,16 @@ async function main() {
 
   await app.listen({ port, host });
   logInfo(`IntelliRAG API listening on ${host}:${port}`);
+
+  // Graceful shutdown
+  const shutdown = async (signal: string) => {
+    logInfo(`Received ${signal}, shutting down gracefully...`);
+    await app.close();
+    await pool.end();
+    process.exit(0);
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 main().catch((err) => {

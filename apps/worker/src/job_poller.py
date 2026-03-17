@@ -138,12 +138,13 @@ def poll_once():
                         WHERE document_id = %s
                     """, (str(e)[:2000], doc_id))
                 else:
+                    backoff_seconds = 2 ** attempt * 5
                     cur.execute("""
                         UPDATE ingestion_job
                         SET status = 'RETRYING', error_message = %s, updated_at = now(),
-                            locked_until = now() + interval '%s seconds'
+                            locked_until = now() + make_interval(secs => %s)
                         WHERE job_id = %s
-                    """, (str(e)[:2000], 2 ** attempt * 5, job_id))
+                    """, (str(e)[:2000], backoff_seconds, job_id))
                 conn.commit()
 
         return True

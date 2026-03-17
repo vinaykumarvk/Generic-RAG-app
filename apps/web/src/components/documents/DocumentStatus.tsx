@@ -19,18 +19,32 @@ export function DocumentStatus({ workspaceId, documentId }: { workspaceId: strin
   const [status, setStatus] = useState<{ status: string; jobs: PipelineStep[] } | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     const token = localStorage.getItem("intellirag_token");
-    const eventSource = new EventSource(
-      `/api/v1/workspaces/${workspaceId}/documents/${documentId}/status`
-    );
 
-    eventSource.onmessage = (event) => {
-      try {
-        setStatus(JSON.parse(event.data));
-      } catch { /* ignore parse errors */ }
-    };
+    async function pollStatus() {
+      while (!cancelled) {
+        try {
+          const response = await fetch(
+            `/api/v1/workspaces/${workspaceId}/documents/${documentId}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (!response.ok) break;
+          const data = await response.json();
+          if (!cancelled) {
+            setStatus(data);
+            // Stop polling if document is in a terminal state
+            if (["ACTIVE", "FAILED", "SEARCHABLE", "DELETED"].includes(data.status)) break;
+          }
+        } catch {
+          // Ignore fetch errors, retry on next interval
+        }
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    }
 
-    return () => eventSource.close();
+    pollStatus();
+    return () => { cancelled = true; };
   }, [workspaceId, documentId]);
 
   if (!status) return null;
@@ -38,7 +52,7 @@ export function DocumentStatus({ workspaceId, documentId }: { workspaceId: strin
   const steps = ["VALIDATE", "NORMALIZE", "CHUNK", "EMBED", "KG_EXTRACT"];
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" role="status" aria-label="Document processing status">
       {steps.map((step) => {
         const job = status.jobs?.find((j: PipelineStep) => j.step === step);
         const isComplete = job?.status === "COMPLETED";
@@ -48,9 +62,9 @@ export function DocumentStatus({ workspaceId, documentId }: { workspaceId: strin
         return (
           <div key={step} className="flex items-center gap-3">
             <div className="w-5">
-              {isComplete && <CheckCircle size={16} className="text-green-500" />}
-              {isProcessing && <Loader2 size={16} className="text-blue-500 animate-spin" />}
-              {isFailed && <AlertCircle size={16} className="text-red-500" />}
+              {isComplete && <CheckCircle size={16} className="text-green-500" aria-hidden="true" />}
+              {isProcessing && <Loader2 size={16} className="text-blue-500 animate-spin" aria-hidden="true" />}
+              {isFailed && <AlertCircle size={16} className="text-red-500" aria-hidden="true" />}
               {!job && <div className="w-4 h-4 rounded-full border-2 border-gray-200" />}
             </div>
             <span className={`text-sm ${isComplete ? "text-green-700" : isProcessing ? "text-blue-600" : isFailed ? "text-red-600" : "text-gray-400"}`}>
