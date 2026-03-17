@@ -7,6 +7,8 @@ import { Pool } from "pg";
 import {
   createApp,
   createAuthMiddleware,
+  createAuthRoutes,
+  createLlmConfigRoutes,
   createAuditLogger,
   createLlmProvider,
   logInfo,
@@ -60,7 +62,6 @@ async function main() {
 
   const auditLogger = createAuditLogger({
     queryFn,
-    tableName: "audit_log",
   });
 
   const app = await createApp({
@@ -82,6 +83,14 @@ async function main() {
     domainRoutes: async (app) => {
       const deps = { queryFn, getClient, llmProvider };
       await app.register(import("@fastify/multipart"), { limits: { fileSize: 52_428_800 } });
+
+      // Auth routes (login, logout, me)
+      const authRoutes = createAuthRoutes({ queryFn, auth: authMiddleware });
+      await app.register(authRoutes);
+
+      // LLM config routes (provider management, system prompts)
+      const llmConfigRoutes = createLlmConfigRoutes({ queryFn, llmProvider });
+      await app.register(llmConfigRoutes);
 
       // Register workspace membership guard for all /workspaces/:wid/* sub-routes
       const workspaceMemberGuard = createWorkspaceMemberGuard(queryFn);

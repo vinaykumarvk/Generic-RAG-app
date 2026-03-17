@@ -42,6 +42,10 @@ export async function runMigrations(pool: Pool): Promise<void> {
       await client.query("BEGIN");
       try {
         await client.query(sql);
+        await client.query(
+          "INSERT INTO schema_migration (version, name) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
+          [version, file]
+        );
         await client.query("COMMIT");
         console.log(`Migration ${file} applied successfully`);
       } catch (err) {

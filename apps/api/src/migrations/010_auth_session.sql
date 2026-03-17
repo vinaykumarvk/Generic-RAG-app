@@ -3,8 +3,6 @@
 -- Creates: auth_token_denylist, auth_session_activity, idempotency_cache
 -- Adds: tokens_revoked_before column to user_account
 
-BEGIN;
-
 -- Token denylist for JWT revocation
 CREATE TABLE IF NOT EXISTS auth_token_denylist (
     jti             TEXT PRIMARY KEY,
@@ -49,5 +47,3 @@ BEGIN
         ALTER TABLE user_account ADD COLUMN tokens_revoked_before TIMESTAMPTZ;
     END IF;
 END $$;
-
-COMMIT;
