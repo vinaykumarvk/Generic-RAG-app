@@ -6,7 +6,7 @@ import { ChatPanel } from "@/components/conversation/ChatPanel";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useDebounce } from "@/hooks/useDebounce";
 import { formatRelativeTime } from "@/lib/time";
-import { MessageSquare, Plus, Trash2, Pin, PinOff, Search, X, Archive, ArchiveRestore, Pencil, Download, MoreVertical } from "lucide-react";
+import { MessageSquare, Plus, Trash2, Pin, PinOff, Search, X, Archive, ArchiveRestore, Pencil, Download, MoreVertical, ArrowLeft } from "lucide-react";
 import { downloadConversationAsPdf } from "@/lib/pdf-export";
 
 interface ConversationSummary {
@@ -29,9 +29,19 @@ export function QueryPage() {
   const [editTitle, setEditTitle] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [showMobileList, setShowMobileList] = useState(true);
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 767px)").matches);
   const menuRef = useRef<HTMLDivElement>(null);
   const debouncedSearch = useDebounce(searchTerm, 300);
   const qc = useQueryClient();
+
+  // Track mobile breakpoint
+  useEffect(() => {
+    const mql = window.matchMedia("(max-width: 767px)");
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, []);
 
   // Close 3-dot menu on outside click or Escape
   useEffect(() => {
@@ -113,15 +123,30 @@ export function QueryPage() {
 
   const truncate = (s: string, len: number) => s.length > len ? s.slice(0, len) + "..." : s;
 
+  const handleSelectConversation = (id: string) => {
+    setActiveConversation(id);
+    if (isMobile) setShowMobileList(false);
+  };
+
+  const handleNewConversation = () => {
+    setActiveConversation(null);
+    if (isMobile) setShowMobileList(false);
+  };
+
+  // On mobile: show list OR chat, never both
+  const showList = !isMobile || showMobileList;
+  const showChat = !isMobile || !showMobileList;
+
   return (
-    <div className="flex h-[calc(100dvh-8rem)] gap-4">
+    <div className="flex h-[calc(100dvh-8rem)] gap-0 md:gap-4">
       {/* Conversation sidebar */}
-      <div className="w-64 bg-surface border border-skin rounded-xl overflow-hidden flex flex-col">
+      {showList && (
+      <div className={`bg-surface border border-skin rounded-xl overflow-hidden flex flex-col ${isMobile ? "w-full" : "w-64"}`}>
         <div className="p-3 border-b border-skin space-y-2">
           <button
             type="button"
-            onClick={() => setActiveConversation(null)}
-            className="w-full flex items-center gap-2 px-3 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors"
+            onClick={handleNewConversation}
+            className="btn-primary btn-primary--full"
           >
             <Plus size={16} aria-hidden="true" />
             New conversation
@@ -131,7 +156,7 @@ export function QueryPage() {
             type="button"
             onClick={() => setShowArchived(!showArchived)}
             className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border transition-colors ${
-              showArchived ? "border-amber-300 bg-amber-50 text-amber-700" : "border-border-primary text-text-secondary hover:bg-surface-secondary"
+              showArchived ? "border-warning-soft surface-warning-soft text-warning" : "border-border-primary text-text-secondary hover:bg-surface-secondary"
             }`}
           >
             <Archive size={12} aria-hidden="true" />
@@ -171,7 +196,7 @@ export function QueryPage() {
             >
               <button
                 type="button"
-                onClick={() => setActiveConversation(conv.conversation_id)}
+                onClick={() => handleSelectConversation(conv.conversation_id)}
                 onDoubleClick={() => {
                   setEditingId(conv.conversation_id);
                   setEditTitle(conv.title || "");
@@ -214,7 +239,7 @@ export function QueryPage() {
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === conv.conversation_id ? null : conv.conversation_id); }}
-                  className="p-1 rounded hover:bg-surface-alt text-skin-muted"
+                  className="p-2 rounded hover:bg-surface-alt text-skin-muted min-h-[2.75rem] min-w-[2.75rem] flex items-center justify-center"
                   aria-label="Conversation options"
                   aria-haspopup="menu"
                   aria-expanded={menuOpenId === conv.conversation_id}
@@ -241,7 +266,7 @@ export function QueryPage() {
                       {conv.is_archived ? "Unarchive" : "Archive"}
                     </button>
                     <div className="border-t border-skin my-1" />
-                    <button type="button" role="menuitem" onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); setDeleteTarget(conv.conversation_id); }} className="w-full flex items-center gap-2 text-left px-3 py-1.5 text-xs hover:bg-red-50 text-red-600 transition-colors">
+                    <button type="button" role="menuitem" onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); setDeleteTarget(conv.conversation_id); }} className="w-full flex items-center gap-2 text-left px-3 py-1.5 text-xs hover-surface-danger-soft text-danger transition-colors">
                       <Trash2 size={12} aria-hidden="true" />
                       Delete
                     </button>
@@ -258,6 +283,7 @@ export function QueryPage() {
           )}
         </div>
       </div>
+      )}
 
       {/* Delete confirmation */}
       {deleteTarget && (
@@ -272,7 +298,24 @@ export function QueryPage() {
       )}
 
       {/* Main chat area */}
-      <div className="flex-1 bg-surface border border-skin rounded-xl overflow-hidden">
+      {showChat && (
+      <div className="flex-1 bg-surface border border-skin rounded-xl overflow-hidden flex flex-col">
+        {/* Mobile back button */}
+        {isMobile && (
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-skin">
+            <button
+              type="button"
+              onClick={() => setShowMobileList(true)}
+              className="p-2 rounded-lg hover:bg-surface-alt text-skin-muted min-h-[2.75rem] min-w-[2.75rem] flex items-center justify-center"
+              aria-label="Back to conversations"
+            >
+              <ArrowLeft size={18} aria-hidden="true" />
+            </button>
+            <span className="text-sm font-medium text-skin-base truncate">
+              {activeConversation ? "Conversation" : "New conversation"}
+            </span>
+          </div>
+        )}
         <ChatPanel
           workspaceId={workspaceId!}
           conversationId={activeConversation}
@@ -282,6 +325,7 @@ export function QueryPage() {
           }}
         />
       </div>
+      )}
     </div>
   );
 }

@@ -151,5 +151,20 @@ describe("lexicalSearch", () => {
       expect(sqlCall[0]).toContain("d.category = ANY($4)");
       expect(sqlCall[1][3]).toEqual(["legal"]);
     });
+
+    it("does not apply case_reference as a hard SQL filter", async () => {
+      const queryFn = createMockQueryFn();
+      queryFn.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+      await lexicalSearch(queryFn, "ws-1", "test query", 10, {
+        case_reference: "424/2021",
+      });
+
+      const sqlCall = queryFn.mock.calls[0];
+      expect(sqlCall[0]).not.toContain("d.case_reference =");
+      expect(sqlCall[0]).toContain("d.case_reference");
+      expect(sqlCall[0]).toContain("d.fir_number");
+      expect(sqlCall[0]).toContain("d.station_code");
+    });
   });
 });

@@ -28,13 +28,17 @@ export function createTestHelpers(config: TestHelperConfig) {
       url: "/api/v1/auth/login",
       payload: { username, password },
     });
-    const body = JSON.parse(res.body);
-    if (!body.token) {
+    const setCookieHeader = Array.isArray(res.headers["set-cookie"])
+      ? res.headers["set-cookie"][0]
+      : res.headers["set-cookie"];
+    const cookieMatch = setCookieHeader?.match(/^[^=]+=([^;]+)/);
+
+    if (!cookieMatch?.[1]) {
       throw new Error(
-        `getAuthToken failed for ${username}: ${res.statusCode} – ${res.body}`,
+        `getAuthToken failed for ${username}: ${res.statusCode} – missing auth cookie`,
       );
     }
-    return body.token as string;
+    return cookieMatch[1];
   }
 
   async function authInject(

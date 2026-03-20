@@ -84,7 +84,7 @@ export function createConfigGovernanceRoutes(deps: ConfigGovernanceRouteDeps) {
       };
 
       const conditions: string[] = [];
-      const params: any[] = [];
+      const params: unknown[] = [];
       let paramIdx = 1;
 
       if (configType) {

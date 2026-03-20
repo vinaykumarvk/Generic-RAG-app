@@ -1,0 +1,4 @@
+interface:
+  display_name: "Deploy App"
+  short_description: "Run a guarded deployment and verify it live"
+  default_prompt: "Use $deploy-app to check deployment readiness, deploy the target service, and verify the live rollout."

@@ -39,6 +39,7 @@ export const RetrievalRunSchema = z.object({
   graph_results_count: z.number().int().default(0),
   final_chunks_count: z.number().int().default(0),
   cache_hit: z.boolean().default(false),
+  graph_node_ids: z.array(z.string()).default([]),
   total_latency_ms: z.number().int(),
   vector_latency_ms: z.number().int().optional(),
   lexical_latency_ms: z.number().int().optional(),
@@ -71,15 +72,25 @@ export type AnswerCache = z.infer<typeof AnswerCacheSchema>;
 // Query Request / Response
 // ---------------------------------------------------------------------------
 
+export const RetrievalModeSchema = z.enum(["hybrid", "vector_only", "metadata_only", "graph_only"]);
+export type RetrievalMode = z.infer<typeof RetrievalModeSchema>;
+
 export const QueryRequestSchema = z.object({
   question: z.string().min(1).max(4000),
   conversation_id: z.string().uuid().optional(),
   preset: RetrievalPresetSchema.default("balanced"),
+  mode: RetrievalModeSchema.default("hybrid"),
   filters: z.object({
     categories: z.array(z.string()).optional(),
     document_ids: z.array(z.string().uuid()).optional(),
     date_from: z.string().datetime().optional(),
     date_to: z.string().datetime().optional(),
+    org_unit_id: z.string().uuid().optional(),
+    case_reference: z.string().optional(),
+    fir_number: z.string().optional(),
+    station_code: z.string().optional(),
+    language: z.string().optional(),
+    sensitivity_levels: z.array(z.string()).optional(),
   }).optional(),
   stream: z.boolean().default(false),
 });

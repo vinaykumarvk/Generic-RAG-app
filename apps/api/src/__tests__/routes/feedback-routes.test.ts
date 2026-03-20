@@ -6,7 +6,7 @@ import { createFeedbackRoutes } from "../../routes/feedback-routes";
 interface MockRouteHandler {
   method: string;
   path: string;
-  handler: (request: any, reply: any) => Promise<any>;
+  handler: (request: unknown, reply: unknown) => Promise<unknown>;
 }
 
 // ── Mock Helpers ──────────────────────────────────────────────────────────────
@@ -26,11 +26,14 @@ function createMockApp() {
   const routes: MockRouteHandler[] = [];
 
   return {
-    get: vi.fn((path: string, handler: any) => {
-      routes.push({ method: "GET", path, handler });
+    get: vi.fn((path: string, handler: unknown) => {
+      routes.push({ method: "GET", path, handler: handler as MockRouteHandler["handler"] });
     }),
-    post: vi.fn((path: string, handler: any) => {
-      routes.push({ method: "POST", path, handler });
+    post: vi.fn((path: string, handler: unknown) => {
+      routes.push({ method: "POST", path, handler: handler as MockRouteHandler["handler"] });
+    }),
+    patch: vi.fn((path: string, handler: unknown) => {
+      routes.push({ method: "PATCH", path, handler: handler as MockRouteHandler["handler"] });
     }),
     _routes: routes,
     findRoute(method: string, path: string) {
@@ -50,42 +53,29 @@ describe("feedback-routes", () => {
     app = createMockApp();
     queryFn = createMockQueryFn();
 
-    createFeedbackRoutes(app as any, { queryFn });
+    createFeedbackRoutes(app as never, { queryFn });
   });
 
-  describe("TC-FR018-01: Submit feedback with rating", () => {
-    it("creates feedback record with numeric rating", async () => {
+  describe("TC-FR019-01: Submit feedback with 3-level", () => {
+    it("creates feedback record with HELPFUL level", async () => {
       const submitRoute = app.findRoute("POST", "/api/v1/workspaces/:wid/feedback");
       expect(submitRoute).toBeDefined();
 
-      // Lookup message to get conversation_id
-      queryFn.mockResolvedValueOnce({
-        rows: [{ conversation_id: "conv-1" }],
-        rowCount: 1,
-      });
+      // Message lookup
+      queryFn.mockResolvedValueOnce({ rows: [{ conversation_id: "conv-1" }], rowCount: 1 });
 
       // Insert feedback
       const feedbackRow = {
         feedback_id: "fb-1",
         message_id: "msg-1",
-        conversation_id: "conv-1",
-        workspace_id: "ws-1",
-        user_id: "user-1",
-        feedback_type: "rating",
-        rating: 4,
-        comment: "Very helpful answer",
-        correction: null,
+        feedback_level: "HELPFUL",
+        comment: "Great answer",
       };
       queryFn.mockResolvedValueOnce({ rows: [feedbackRow], rowCount: 1 });
 
       const request = {
         params: { wid: "ws-1" },
-        body: {
-          message_id: "msg-1",
-          feedback_type: "rating",
-          rating: 4,
-          comment: "Very helpful answer",
-        },
+        body: { message_id: "msg-1", feedback_level: "HELPFUL", comment: "Great answer" },
         authUser: { userId: "user-1" },
       };
 
@@ -93,37 +83,22 @@ describe("feedback-routes", () => {
       const result = await submitRoute!.handler(request, reply);
 
       expect(reply.code).toHaveBeenCalledWith(201);
-      expect(result.feedback_id).toBe("fb-1");
-      expect(result.rating).toBe(4);
-      expect(result.feedback_type).toBe("rating");
+      expect(result).toEqual(feedbackRow);
 
-      // Verify the insert params
       const insertCall = queryFn.mock.calls[1];
       expect(insertCall[0]).toContain("INSERT INTO feedback");
-      expect(insertCall[1][0]).toBe("msg-1"); // message_id
-      expect(insertCall[1][1]).toBe("conv-1"); // conversation_id
-      expect(insertCall[1][2]).toBe("ws-1"); // workspace_id
-      expect(insertCall[1][3]).toBe("user-1"); // user_id
-      expect(insertCall[1][4]).toBe("rating"); // feedback_type
-      expect(insertCall[1][5]).toBe(4); // rating
-      expect(insertCall[1][6]).toBe("Very helpful answer"); // comment
+      expect(insertCall[1][0]).toBe("msg-1");
     });
-  });
 
-  describe("TC-FR018-02: Submit feedback with thumbs up/down", () => {
-    it("creates feedback record with thumbs_up type", async () => {
+    it("creates NOT_HELPFUL feedback with issue_tags", async () => {
       const submitRoute = app.findRoute("POST", "/api/v1/workspaces/:wid/feedback");
 
-      queryFn.mockResolvedValueOnce({
-        rows: [{ conversation_id: "conv-1" }],
-        rowCount: 1,
-      });
+      queryFn.mockResolvedValueOnce({ rows: [{ conversation_id: "conv-1" }], rowCount: 1 });
 
       const feedbackRow = {
         feedback_id: "fb-2",
-        message_id: "msg-2",
-        feedback_type: "thumbs_up",
-        rating: null,
+        feedback_level: "NOT_HELPFUL",
+        issue_tags: ["inaccurate", "missing_info"],
       };
       queryFn.mockResolvedValueOnce({ rows: [feedbackRow], rowCount: 1 });
 
@@ -131,7 +106,8 @@ describe("feedback-routes", () => {
         params: { wid: "ws-1" },
         body: {
           message_id: "msg-2",
-          feedback_type: "thumbs_up",
+          feedback_level: "NOT_HELPFUL",
+          issue_tags: ["inaccurate", "missing_info"],
         },
         authUser: { userId: "user-1" },
       };
@@ -140,104 +116,100 @@ describe("feedback-routes", () => {
       const result = await submitRoute!.handler(request, reply);
 
       expect(reply.code).toHaveBeenCalledWith(201);
-      expect(result.feedback_type).toBe("thumbs_up");
-
-      // rating should be null when not provided
-      const insertCall = queryFn.mock.calls[1];
-      expect(insertCall[1][5]).toBeNull(); // rating is null
-    });
-
-    it("creates feedback record with thumbs_down type and correction", async () => {
-      const submitRoute = app.findRoute("POST", "/api/v1/workspaces/:wid/feedback");
-
-      queryFn.mockResolvedValueOnce({
-        rows: [{ conversation_id: "conv-1" }],
-        rowCount: 1,
-      });
-
-      const feedbackRow = {
-        feedback_id: "fb-3",
-        message_id: "msg-3",
-        feedback_type: "thumbs_down",
-        correction: "The correct answer is...",
-      };
-      queryFn.mockResolvedValueOnce({ rows: [feedbackRow], rowCount: 1 });
-
-      const request = {
-        params: { wid: "ws-1" },
-        body: {
-          message_id: "msg-3",
-          feedback_type: "thumbs_down",
-          correction: "The correct answer is...",
-        },
-        authUser: { userId: "user-1" },
-      };
-
-      const reply = createMockReply();
-      const result = await submitRoute!.handler(request, reply);
-
-      expect(result.feedback_type).toBe("thumbs_down");
-      expect(result.correction).toBe("The correct answer is...");
-
-      const insertCall = queryFn.mock.calls[1];
-      expect(insertCall[1][7]).toBe("The correct answer is..."); // correction
+      expect(result).toEqual(feedbackRow);
     });
   });
 
-  describe("TC-FR018-03: List feedback for workspace", () => {
-    it("returns paginated feedback list", async () => {
+  describe("TC-FR019-02: List feedback for workspace", () => {
+    it("returns paginated feedback list (admin sees all)", async () => {
       const listRoute = app.findRoute("GET", "/api/v1/workspaces/:wid/feedback");
       expect(listRoute).toBeDefined();
 
       const feedbackRows = [
-        { feedback_id: "fb-1", feedback_type: "rating", rating: 5, message_content: "Answer text", user_name: "John" },
-        { feedback_id: "fb-2", feedback_type: "thumbs_up", rating: null, message_content: "Another answer", user_name: "Jane" },
+        { feedback_id: "fb-1", feedback_level: "HELPFUL", user_name: "John" },
+        { feedback_id: "fb-2", feedback_level: "NOT_HELPFUL", user_name: "Jane" },
       ];
-      queryFn.mockResolvedValueOnce({ rows: feedbackRows, rowCount: 2 });
+      queryFn
+        .mockResolvedValueOnce({ rows: [{ count: "2" }], rowCount: 1 })
+        .mockResolvedValueOnce({ rows: feedbackRows, rowCount: 2 });
 
       const request = {
         params: { wid: "ws-1" },
         query: { page: "1", limit: "20" },
+        authUser: { userId: "admin-1", userType: "ADMIN" },
       };
 
       const result = await listRoute!.handler(request, createMockReply());
+      const res = result as { feedback: unknown[]; page: number; limit: number; total: number };
 
-      expect(result.feedback).toEqual(feedbackRows);
-      expect(result.page).toBe(1);
-      expect(result.limit).toBe(20);
+      expect(res.feedback).toEqual(feedbackRows);
+      expect(res.page).toBe(1);
+      expect(res.limit).toBe(20);
+      expect(res.total).toBe(2);
     });
 
-    it("filters by feedback type when specified", async () => {
+    it("non-admin sees only own feedback", async () => {
       const listRoute = app.findRoute("GET", "/api/v1/workspaces/:wid/feedback");
 
-      queryFn.mockResolvedValueOnce({ rows: [], rowCount: 0 });
-
-      const request = {
-        params: { wid: "ws-1" },
-        query: { type: "thumbs_down", page: "1", limit: "10" },
-      };
-
-      await listRoute!.handler(request, createMockReply());
-
-      const sqlCall = queryFn.mock.calls[0];
-      expect(sqlCall[0]).toContain("feedback_type = $2");
-      expect(sqlCall[1]).toContain("thumbs_down");
-    });
-
-    it("applies default pagination values", async () => {
-      const listRoute = app.findRoute("GET", "/api/v1/workspaces/:wid/feedback");
-
-      queryFn.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+      queryFn
+        .mockResolvedValueOnce({ rows: [{ count: "0" }], rowCount: 1 })
+        .mockResolvedValueOnce({ rows: [], rowCount: 0 });
 
       const request = {
         params: { wid: "ws-1" },
         query: {},
+        authUser: { userId: "user-1", userType: "ANALYST" },
       };
 
-      const result = await listRoute!.handler(request, createMockReply());
+      await listRoute!.handler(request, createMockReply());
 
-      expect(result.page).toBe(1);
-      expect(result.limit).toBe(20);
+      // Should include user_id filter for non-admin
+      const countCall = queryFn.mock.calls[0];
+      expect(countCall[0]).toContain("f.user_id = $");
+      expect(countCall[1]).toContain("user-1");
+    });
+  });
+
+  describe("TC-FR019-03: Admin resolve feedback", () => {
+    it("admin can resolve feedback with notes", async () => {
+      const resolveRoute = app.findRoute("PATCH", "/api/v1/workspaces/:wid/feedback/:id");
+      expect(resolveRoute).toBeDefined();
+
+      const updatedRow = {
+        feedback_id: "fb-1",
+        admin_notes: "Investigated and fixed",
+        resolved_at: "2026-03-18T00:00:00Z",
+      };
+      queryFn.mockResolvedValueOnce({ rows: [updatedRow], rowCount: 1 });
+
+      const request = {
+        params: { wid: "ws-1", id: "fb-1" },
+        body: { admin_notes: "Investigated and fixed", status: "resolved" },
+        authUser: { userId: "admin-1", userType: "ADMIN" },
+      };
+
+      const result = await resolveRoute!.handler(request, createMockReply());
+      expect(result).toEqual(updatedRow);
+
+      const updateCall = queryFn.mock.calls[0];
+      expect(updateCall[0]).toContain("UPDATE feedback");
+      expect(updateCall[0]).toContain("admin_notes");
+      expect(updateCall[0]).toContain("resolved_at");
+    });
+
+    it("non-admin is rejected", async () => {
+      const resolveRoute = app.findRoute("PATCH", "/api/v1/workspaces/:wid/feedback/:id");
+
+      const request = {
+        params: { wid: "ws-1", id: "fb-1" },
+        body: { status: "resolved" },
+        authUser: { userId: "user-1", userType: "ANALYST" },
+      };
+
+      const reply = createMockReply();
+      await resolveRoute!.handler(request, reply);
+
+      expect(reply.code).toHaveBeenCalledWith(403);
     });
   });
 
@@ -247,29 +219,7 @@ describe("feedback-routes", () => {
 
       const request = {
         params: { wid: "ws-1" },
-        body: {
-          feedback_type: "rating",
-          rating: 5,
-        },
-        authUser: { userId: "user-1" },
-      };
-
-      const reply = createMockReply();
-      await submitRoute!.handler(request, reply);
-
-      // send400 is called — no feedback insert should happen
-      expect(queryFn).not.toHaveBeenCalled();
-    });
-
-    it("returns 400 when feedback_type is missing", async () => {
-      const submitRoute = app.findRoute("POST", "/api/v1/workspaces/:wid/feedback");
-
-      const request = {
-        params: { wid: "ws-1" },
-        body: {
-          message_id: "msg-1",
-          rating: 5,
-        },
+        body: { feedback_level: "HELPFUL" },
         authUser: { userId: "user-1" },
       };
 
@@ -282,14 +232,35 @@ describe("feedback-routes", () => {
     it("returns 400 when message does not exist", async () => {
       const submitRoute = app.findRoute("POST", "/api/v1/workspaces/:wid/feedback");
 
-      // Message lookup returns empty
       queryFn.mockResolvedValueOnce({ rows: [], rowCount: 0 });
 
       const request = {
         params: { wid: "ws-1" },
+        body: { message_id: "nonexistent-msg", feedback_level: "HELPFUL" },
+        authUser: { userId: "user-1" },
+      };
+
+      const reply = createMockReply();
+      await submitRoute!.handler(request, reply);
+
+      expect(queryFn).toHaveBeenCalledTimes(1);
+      const insertCalls = queryFn.mock.calls.filter(
+        (call: unknown[]) => typeof call[0] === "string" && (call[0] as string).includes("INSERT INTO feedback")
+      );
+      expect(insertCalls).toHaveLength(0);
+    });
+
+    it("rejects >10 issue_tags", async () => {
+      const submitRoute = app.findRoute("POST", "/api/v1/workspaces/:wid/feedback");
+
+      queryFn.mockResolvedValueOnce({ rows: [{ conversation_id: "conv-1" }], rowCount: 1 });
+
+      const request = {
+        params: { wid: "ws-1" },
         body: {
-          message_id: "nonexistent-msg",
-          feedback_type: "thumbs_up",
+          message_id: "msg-1",
+          feedback_level: "NOT_HELPFUL",
+          issue_tags: Array.from({ length: 11 }, (_, i) => `tag-${i}`),
         },
         authUser: { userId: "user-1" },
       };
@@ -297,8 +268,7 @@ describe("feedback-routes", () => {
       const reply = createMockReply();
       await submitRoute!.handler(request, reply);
 
-      // Only the message lookup should have been called, no insert
-      expect(queryFn).toHaveBeenCalledTimes(1);
+      // Insert should not have been called
       const insertCalls = queryFn.mock.calls.filter(
         (call: unknown[]) => typeof call[0] === "string" && (call[0] as string).includes("INSERT INTO feedback")
       );
@@ -307,10 +277,12 @@ describe("feedback-routes", () => {
   });
 
   describe("Route registration", () => {
-    it("registers POST and GET feedback routes", () => {
-      expect(app._routes).toHaveLength(2);
+    it("registers POST, GET, PATCH, and stats routes", () => {
+      expect(app._routes).toHaveLength(4);
       expect(app.findRoute("POST", "/api/v1/workspaces/:wid/feedback")).toBeDefined();
       expect(app.findRoute("GET", "/api/v1/workspaces/:wid/feedback")).toBeDefined();
+      expect(app.findRoute("PATCH", "/api/v1/workspaces/:wid/feedback/:id")).toBeDefined();
+      expect(app.findRoute("GET", "/api/v1/workspaces/:wid/feedback/stats")).toBeDefined();
     });
   });
 });

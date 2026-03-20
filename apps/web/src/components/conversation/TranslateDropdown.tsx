@@ -111,7 +111,7 @@ export function TranslateDropdown({ workspaceId, sourceType, sourceId }: Transla
               <MarkdownContent content={result.translation.translated_content} />
               <div className="flex justify-end mt-1">
                 <button type="button" onClick={handleCopy} className="p-1 rounded hover:bg-surface text-skin-muted hover:text-skin-base transition-colors" aria-label="Copy translation">
-                  {copied ? <Check size={12} className="text-green-500" aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
+                  {copied ? <Check size={12} className="text-success" aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
                 </button>
               </div>
             </div>
@@ -127,7 +127,7 @@ export function TranslateDropdown({ workspaceId, sourceType, sourceId }: Transla
       )}
 
       {translateMutation.error && (
-        <div className="mt-2 px-3 py-1.5 text-xs text-red-600 bg-red-50 rounded">
+        <div className="mt-2 px-3 py-1.5 text-xs text-danger surface-danger-soft rounded">
           Translation failed. Please try again.
         </div>
       )}

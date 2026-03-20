@@ -13,6 +13,44 @@
 import { logInfo, logWarn, logError } from "../logging/logger";
 import type { QueryFn } from "../types";
 
+// ── Model Routing ────────────────────────────────────────────────────────────
+
+/** Model routing: maps use cases/presets to specific models via env vars */
+export interface ModelRoutingConfig {
+  [useCase: string]: {
+    concise?: string;
+    balanced?: string;
+    detailed?: string;
+  };
+}
+
+/** Valid retrieval preset names */
+export type RetrievalPreset = "concise" | "balanced" | "detailed";
+
+/**
+ * Read model routing from environment variables.
+ * Pattern: LLM_MODEL_{PRESET} for global routing,
+ *          LLM_MODEL_{USECASE}_{PRESET} for per-use-case routing.
+ */
+function loadModelRoutingConfig(): ModelRoutingConfig {
+  const presets: RetrievalPreset[] = ["concise", "balanced", "detailed"];
+  const config: ModelRoutingConfig = {};
+
+  // Global routing: LLM_MODEL_CONCISE, LLM_MODEL_BALANCED, LLM_MODEL_DETAILED
+  const globalEntry: ModelRoutingConfig["_global"] = {};
+  for (const preset of presets) {
+    const envVal = process.env[`LLM_MODEL_${preset.toUpperCase()}`];
+    if (envVal) {
+      globalEntry[preset] = envVal;
+    }
+  }
+  if (Object.keys(globalEntry).length > 0) {
+    config._global = globalEntry;
+  }
+
+  return config;
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type LlmUseCase =
@@ -52,6 +90,8 @@ export interface LlmCompletionRequest {
   entityId?: string;
   /** When true, inject JSON-output instruction into messages */
   jsonMode?: boolean;
+  /** Override the default model for this request (e.g. per-preset answer generation) */
+  modelOverride?: string;
 }
 
 export interface LlmCompletionResponse {
@@ -134,7 +174,11 @@ const OpenAiEmbeddingAdapter: EmbeddingProviderAdapter = {
         "Content-Type": "application/json",
         Authorization: `Bearer ${config.api_key_enc}`,
       },
-      body: { model: model || config.config_jsonb?.embedding_model || "text-embedding-3-small", input },
+      body: {
+        model: model || config.config_jsonb?.embedding_model || "text-embedding-3-small",
+        input,
+        ...(config.config_jsonb?.embedding_dimensions ? { dimensions: config.config_jsonb.embedding_dimensions } : {}),
+      },
     };
   },
   parseResponse(json: unknown) {
@@ -178,7 +222,7 @@ interface LlmProviderAdapter {
     config: LlmProviderConfig,
     messages: LlmMessage[],
     maxTokens: number,
-    temperature: number,
+    temperature: number | undefined,
     options?: { jsonMode?: boolean },
   ): { url: string; headers: Record<string, string>; body: unknown };
 
@@ -218,7 +262,7 @@ const OpenAiAdapter: LlmProviderAdapter = {
         model: config.model_id,
         messages: finalMessages,
         max_completion_tokens: maxTokens,
-        temperature,
+        ...(temperature !== undefined && { temperature }),
       },
     };
   },
@@ -231,6 +275,59 @@ const OpenAiAdapter: LlmProviderAdapter = {
       content: (msg?.content as string) || "",
       promptTokens: usage?.prompt_tokens,
       outputTokens: usage?.completion_tokens,
+    };
+  },
+  testPayload() {
+    return { messages: [{ role: "user" as const, content: "Reply with: OK" }], maxTokens: 5, temperature: 0 };
+  },
+};
+
+/**
+ * OpenAI Responses API adapter — used for model-overridden requests (reasoning models).
+ * Unlike Chat Completions, the Responses API counts reasoning tokens separately
+ * from max_output_tokens, so the full token budget goes to visible output.
+ */
+const OpenAiResponsesAdapter: LlmProviderAdapter = {
+  buildRequest(config, messages, maxTokens, _temperature, options) {
+    const finalMessages = options?.jsonMode ? injectJsonInstruction(messages) : messages;
+    const systemMsg = finalMessages.find((m) => m.role === "system");
+    const nonSystem = finalMessages.filter((m) => m.role !== "system");
+    return {
+      url: `${config.api_base_url}/responses`,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.api_key_enc}`,
+      },
+      body: {
+        model: config.model_id,
+        ...(systemMsg && { instructions: systemMsg.content }),
+        input: nonSystem.map((m) => ({ role: m.role, content: m.content })),
+      },
+    };
+  },
+  parseResponse(json: unknown) {
+    const j = json as Record<string, unknown>;
+    const output = j.output as Array<Record<string, unknown>> | undefined;
+    let content = "";
+    if (output) {
+      for (const item of output) {
+        if (item.type === "message") {
+          const contentBlocks = item.content as Array<Record<string, unknown>> | undefined;
+          if (contentBlocks) {
+            for (const block of contentBlocks) {
+              if (block.type === "output_text" && typeof block.text === "string") {
+                content += block.text;
+              }
+            }
+          }
+        }
+      }
+    }
+    const usage = j.usage as Record<string, number> | undefined;
+    return {
+      content,
+      promptTokens: usage?.input_tokens,
+      outputTokens: usage?.output_tokens,
     };
   },
   testPayload() {
@@ -422,10 +519,41 @@ export interface LlmProvider {
   testProvider(config: LlmProviderConfig): Promise<{ success: boolean; latencyMs: number; error?: string }>;
   getSystemPrompt(useCase: LlmUseCase): Promise<string | null>;
   invalidateProviderCache(): void;
+  /** Get model override for a given use case + retrieval preset from env-based routing config */
+  getModelForPreset(useCase: string, preset: string): string | undefined;
 }
 
 export function createLlmProvider(deps: LlmProviderDeps): LlmProvider {
   const { queryFn } = deps;
+
+  // ── Model Routing Config ───────────────────────────────────────────────
+  const modelRouting = loadModelRoutingConfig();
+
+  /**
+   * Get model override for a use case + preset combination (FR-014/AC-05).
+   * Checks use-case-specific env vars first, then global preset env vars.
+   * Returns undefined if no override is configured (use default model).
+   */
+  function getModelForPreset(useCase: string, preset: string): string | undefined {
+    const normalizedPreset = preset.toLowerCase();
+    if (normalizedPreset !== "concise" && normalizedPreset !== "balanced" && normalizedPreset !== "detailed") {
+      return undefined;
+    }
+
+    // Check use-case-specific routing first: LLM_MODEL_{USECASE}_{PRESET}
+    const useCaseKey = `LLM_MODEL_${useCase.toUpperCase()}_${normalizedPreset.toUpperCase()}`;
+    const useCaseModel = process.env[useCaseKey];
+    if (useCaseModel) return useCaseModel;
+
+    // Fall back to global routing
+    const globalEntry = modelRouting._global;
+    if (globalEntry) {
+      const model = globalEntry[normalizedPreset as RetrievalPreset];
+      if (model) return model;
+    }
+
+    return undefined;
+  }
 
   // ── Config Cache ─────────────────────────────────────────────────────────
   let cachedConfig: LlmProviderConfig | null = null;
@@ -440,7 +568,7 @@ export function createLlmProvider(deps: LlmProviderDeps): LlmProvider {
   async function loadDefaultConfig(): Promise<LlmProviderConfig | null> {
     if (cachedConfig && Date.now() < cacheExpiry) return cachedConfig;
 
-    const envKey = process.env.OPEN_AI_API_KEY;
+    const envKey = process.env.OPEN_AI_API_KEY || process.env.OPENAI_API_KEY;
     const envModel = process.env.OPEN_AI_MODEL || "gpt-4o";
 
     try {
@@ -540,10 +668,17 @@ export function createLlmProvider(deps: LlmProviderDeps): LlmProvider {
 
   // ── Core Completion ──────────────────────────────────────────────────────
   async function llmComplete(request: LlmCompletionRequest): Promise<LlmCompletionResponse | null> {
-    const config = await loadDefaultConfig();
-    if (!config) return null;
+    const baseConfig = await loadDefaultConfig();
+    if (!baseConfig) return null;
 
-    const adapter = ADAPTERS[config.provider];
+    const config = request.modelOverride
+      ? { ...baseConfig, model_id: request.modelOverride }
+      : baseConfig;
+
+    // Use Responses API for OpenAI model overrides (handles reasoning tokens separately)
+    const adapter = (request.modelOverride && config.provider === "openai")
+      ? OpenAiResponsesAdapter
+      : ADAPTERS[config.provider];
     if (!adapter) {
       logWarn("Unknown LLM provider", { provider: config.provider });
       return null;
@@ -564,7 +699,9 @@ export function createLlmProvider(deps: LlmProviderDeps): LlmProvider {
     }
 
     const maxTokens = request.maxTokens || Number(config.max_tokens) || 2048;
-    const temperature = Number(request.temperature ?? config.temperature) || 0.3;
+    const temperature = request.temperature !== undefined
+      ? Number(request.temperature)
+      : request.modelOverride ? undefined : (Number(config.temperature) || 0.3);
     const { url, headers: hdrs, body } = adapter.buildRequest(config, messages, maxTokens, temperature, { jsonMode: request.jsonMode });
 
     const start = Date.now();
@@ -712,5 +849,5 @@ export function createLlmProvider(deps: LlmProviderDeps): LlmProvider {
     }
   }
 
-  return { llmComplete, llmCompleteJson, llmEmbed, isLlmAvailable, getActiveProvider, testProvider, getSystemPrompt, invalidateProviderCache };
+  return { llmComplete, llmCompleteJson, llmEmbed, isLlmAvailable, getActiveProvider, testProvider, getSystemPrompt, invalidateProviderCache, getModelForPreset };
 }

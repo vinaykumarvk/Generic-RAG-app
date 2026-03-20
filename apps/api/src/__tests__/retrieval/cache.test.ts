@@ -23,6 +23,7 @@ function createMockLlmProvider(embeddings: number[][] = [[0.1, 0.2, 0.3]]) {
     testProvider: vi.fn(),
     getSystemPrompt: vi.fn(),
     invalidateProviderCache: vi.fn(),
+    getModelForPreset: vi.fn().mockReturnValue(undefined),
   };
 }
 
@@ -173,6 +174,27 @@ describe("answer cache", () => {
       expect(sqlCall[1]).toContain("concise");
     });
 
+    it("includes active_filters in cache lookup", async () => {
+      const queryFn = createMockQueryFn();
+      const llmProvider = createMockLlmProvider();
+
+      queryFn.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+      await checkCache(
+        { queryFn, llmProvider },
+        "ws-1",
+        "Who are the witnesses?",
+        "balanced",
+        "INTERNAL:MEMBER",
+        { mode: "hybrid", case_reference: "424/2021" }
+      );
+
+      const sqlCall = queryFn.mock.calls[0];
+      expect(sqlCall[0]).toContain("active_filters");
+      expect(sqlCall[1][4]).toBe(JSON.stringify({ case_reference: "424/2021", mode: "hybrid" }));
+      expect(sqlCall[1][5]).toBe("INTERNAL:MEMBER");
+    });
+
     it("filters out expired cache entries (24h TTL enforced by SQL)", async () => {
       const queryFn = createMockQueryFn();
       const llmProvider = createMockLlmProvider();
@@ -214,6 +236,9 @@ describe("answer cache", () => {
       const queryFn = createMockQueryFn();
       const llmProvider = createMockLlmProvider([[0.5, 0.6, 0.7]]);
 
+      // First call: TTL config lookup from system_setting
+      queryFn.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+      // Second call: INSERT INTO answer_cache
       queryFn.mockResolvedValueOnce({ rows: [], rowCount: 1 });
 
       await writeCache(
@@ -226,9 +251,13 @@ describe("answer cache", () => {
       );
 
       expect(llmProvider.llmEmbed).toHaveBeenCalledWith({ input: "What is the policy?" });
-      expect(queryFn).toHaveBeenCalledTimes(1);
+      expect(queryFn).toHaveBeenCalledTimes(2);
 
-      const insertCall = queryFn.mock.calls[0];
+      // First call is TTL lookup
+      expect(queryFn.mock.calls[0][0]).toContain("system_setting");
+
+      // Second call is the cache insert
+      const insertCall = queryFn.mock.calls[1];
       expect(insertCall[0]).toContain("INSERT INTO answer_cache");
       expect(insertCall[1][0]).toBe("ws-1"); // workspace_id
       expect(insertCall[1][1]).toBe("What is the policy?"); // query_text
@@ -238,6 +267,34 @@ describe("answer cache", () => {
         { chunk_id: "c1", document_title: "Policy", excerpt: "Section 1" },
       ]);
       expect(insertCall[1][5]).toBe("balanced"); // preset
+      expect(insertCall[1][7]).toBe(JSON.stringify({}));
+    });
+
+    it("stores normalized active_filters for scope-aware reuse", async () => {
+      const queryFn = createMockQueryFn();
+      const llmProvider = createMockLlmProvider([[0.5, 0.6, 0.7]]);
+
+      queryFn.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+      queryFn.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+
+      await writeCache(
+        { queryFn, llmProvider },
+        "ws-1",
+        "Who are the witnesses?",
+        "Witnesses include...",
+        [{ chunk_id: "c1", document_title: "Witness List", excerpt: "A, B, C" }],
+        "balanced",
+        "INTERNAL:MEMBER",
+        { mode: "hybrid", case_reference: "424/2021", categories: ["legal", "case"] }
+      );
+
+      const insertCall = queryFn.mock.calls[1];
+      expect(insertCall[1][6]).toBe("INTERNAL:MEMBER");
+      expect(insertCall[1][7]).toBe(JSON.stringify({
+        case_reference: "424/2021",
+        categories: ["case", "legal"],
+        mode: "hybrid",
+      }));
     });
 
     it("does nothing when embedding generation fails", async () => {

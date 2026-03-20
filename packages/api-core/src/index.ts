@@ -82,6 +82,8 @@ export type {
   EmbeddingRequest,
   EmbeddingResponse,
   JsonFieldSpec,
+  ModelRoutingConfig,
+  RetrievalPreset,
 } from "./llm/llm-provider";
 
 // App builder

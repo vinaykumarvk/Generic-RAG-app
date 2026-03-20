@@ -1,5 +1,6 @@
 import pg from "pg";
 import fs from "fs";
+import type { QueryParams, QueryResult, QueryRow } from "./types";
 
 export interface CreatePoolConfig {
   envPrefix: string;
@@ -18,7 +19,7 @@ export function createPool(config: CreatePoolConfig) {
     throw new Error(`FATAL: ${envPrefix}_DATABASE_URL must be set in non-test runtime`);
   }
 
-  function resolveSslConfig(): any {
+  function resolveSslConfig(): pg.PoolConfig["ssl"] | undefined {
     const sslEnv = process.env.DATABASE_SSL;
     if (sslEnv === "false") {
       const dbUrl = process.env[`${envPrefix}_DATABASE_URL`] || process.env.DATABASE_URL || "";
@@ -56,9 +57,9 @@ export function createPool(config: CreatePoolConfig) {
     }, 30_000).unref();
   }
 
-  async function query(text: string, params?: any[]) {
+  async function query<T = any>(text: string, params?: QueryParams): Promise<QueryResult<T>> {
     const start = Date.now();
-    const res = await pool.query(text, params);
+    const res = await pool.query(text, params as unknown[] | undefined) as unknown as QueryResult<T>;
     const duration = Date.now() - start;
     if (duration > 500) {
       logWarnFn("SLOW_QUERY", { text: text.slice(0, 120), durationMs: duration });

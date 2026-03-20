@@ -6,7 +6,7 @@
  */
 
 import { FastifyInstance } from "fastify";
-import type { QueryFn } from "../types";
+import type { QueryFn, RequestUserLike, RequestUserResolver } from "../types";
 import type { LlmProvider } from "../llm/llm-provider";
 import { sendError } from "../errors";
 import { logWarn } from "../logging/logger";
@@ -15,11 +15,11 @@ export interface PageAgentRouteDeps {
   queryFn: QueryFn;
   llmProvider: LlmProvider;
   /** Extract user from request (varies by app — authUser, user, etc.) */
-  getUser?: (request: any) => any;
+  getUser?: RequestUserResolver;
 }
 
 export function createPageAgentRoutes(deps: PageAgentRouteDeps) {
-  const { queryFn, llmProvider, getUser = (r: any) => r.authUser || r.user } = deps;
+  const { queryFn, llmProvider, getUser = (request) => request.authUser || (request.user as RequestUserLike | undefined) } = deps;
 
   return async function registerPageAgentRoutes(app: FastifyInstance): Promise<void> {
     // ── POST /api/v1/page-agent/complete ───────────────────────────────────

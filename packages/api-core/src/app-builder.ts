@@ -22,7 +22,7 @@ export interface AppBuilderConfig {
   swaggerTags?: SwaggerTag[];
   authMiddleware: AuthMiddleware;
   auditLogger: AuditLogger;
-  dbQueryFn: () => Promise<{ rows: any[] }>;
+  dbQueryFn: () => Promise<{ rows: Record<string, unknown>[] }>;
   logWarnFn: (message: string, fields?: Record<string, unknown>) => void;
   domainRoutes: (app: FastifyInstance) => Promise<void>;
 }
@@ -70,7 +70,7 @@ export async function createApp(config: AppBuilderConfig, logger = true): Promis
     },
   });
   await app.register(compress, { global: true, threshold: 1024 });
-  await app.register(cors, { origin: allowedOrigins, credentials: true });
+  await app.register(cors, { origin: allowedOrigins, credentials: true, methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] });
   await app.register(cookie);
 
   const globalRateLimitMax = Number.parseInt(process.env.RATE_LIMIT_MAX || "100", 10);

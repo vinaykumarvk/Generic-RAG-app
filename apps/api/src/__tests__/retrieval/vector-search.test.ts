@@ -18,6 +18,7 @@ function createMockLlmProvider(embeddings: number[][] = [[0.1, 0.2, 0.3]]) {
       dimensions: 3,
       latencyMs: 10,
     }),
+    getModelForPreset: vi.fn().mockReturnValue(undefined),
     isLlmAvailable: vi.fn().mockResolvedValue(true),
     getActiveProvider: vi.fn(),
     testProvider: vi.fn(),
@@ -141,6 +142,48 @@ describe("vectorSearch", () => {
       expect(sqlCall[0]).toContain("d.category = ANY($5)");
       expect(sqlCall[1][3]).toEqual(["doc-a"]);
       expect(sqlCall[1][4]).toEqual(["policy"]);
+    });
+  });
+
+  describe("Case scope metadata", () => {
+    it("does not apply case_reference as a hard SQL filter when case_reference provided", async () => {
+      const queryFn = createMockQueryFn();
+      const llmProvider = createMockLlmProvider();
+
+      queryFn.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+      await vectorSearch(
+        { queryFn, llmProvider },
+        "ws-1",
+        "test query",
+        10,
+        { case_reference: "424/2021" }
+      );
+
+      const sqlCall = queryFn.mock.calls[0];
+      expect(sqlCall[0]).not.toContain("d.case_reference =");
+    });
+
+    it("returns document scope metadata for downstream filtering", async () => {
+      const queryFn = createMockQueryFn();
+      const llmProvider = createMockLlmProvider();
+
+      queryFn.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+      await vectorSearch(
+        { queryFn, llmProvider },
+        "ws-1",
+        "test query",
+        10,
+        { documentIds: ["doc-a"], categories: ["policy"], case_reference: "424/2021" }
+      );
+
+      const sqlCall = queryFn.mock.calls[0];
+      expect(sqlCall[0]).toContain("c.document_id = ANY($4)");
+      expect(sqlCall[0]).toContain("d.category = ANY($5)");
+      expect(sqlCall[0]).toContain("d.case_reference");
+      expect(sqlCall[0]).toContain("d.fir_number");
+      expect(sqlCall[0]).toContain("d.station_code");
     });
   });
 

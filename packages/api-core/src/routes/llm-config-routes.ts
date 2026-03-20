@@ -7,7 +7,7 @@
  */
 
 import { FastifyInstance } from "fastify";
-import type { QueryFn } from "../types";
+import type { QueryFn, RequestUserLike, RequestUserResolver } from "../types";
 import type { LlmProvider, LlmProviderConfig } from "../llm/llm-provider";
 import { sendError, send403 } from "../errors";
 
@@ -16,19 +16,24 @@ export interface LlmConfigRouteDeps {
   llmProvider: LlmProvider;
   adminRoles?: string[];
   /** Extract user from request (varies by app — authUser, user, etc.) */
-  getUser?: (request: any) => any;
+  getUser?: RequestUserResolver;
 }
 
 export function createLlmConfigRoutes(deps: LlmConfigRouteDeps) {
-  const { queryFn, llmProvider, adminRoles = ["ADMIN", "SUPER_ADMIN", "SYSTEM_ADMIN"], getUser = (r: any) => r.authUser || r.user } = deps;
+  const {
+    queryFn,
+    llmProvider,
+    adminRoles = ["ADMIN", "SUPER_ADMIN", "SYSTEM_ADMIN"],
+    getUser = (request) => request.authUser || (request.user as RequestUserLike | undefined),
+  } = deps;
 
-  function isAdmin(user: any): boolean {
+  function isAdmin(user: RequestUserLike | undefined): boolean {
     if (!user) return false;
     if (user.roles?.length) {
       return user.roles.some((r: string) => adminRoles.includes(r));
     }
     if (user.postings?.length) {
-      return user.postings.some((p: any) => {
+      return user.postings.some((p) => {
         const roles = p.system_role_ids || (p.role_key ? [p.role_key] : []);
         return roles.some((r: string) => adminRoles.includes(r));
       });

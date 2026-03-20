@@ -22,6 +22,15 @@
     "test:e2e": "playwright test --config=e2e/playwright.a11y.config.ts",
     "test:e2e:a11y": "playwright test --config=e2e/playwright.a11y.config.ts",
     "test:api:load": "npm --workspace apps/api run test:load",
+    "prepare": "husky",
+    "lint": "bash scripts/lint-all.sh",
+    "lint:staged": "bash scripts/lint-all.sh --staged",
+    "lint:baseline": "bash scripts/lint-all.sh --fix-baseline",
+    "lint:security": "bash scripts/checks/security.sh",
+    "lint:quality": "bash scripts/checks/quality.sh",
+    "lint:ui": "bash scripts/checks/ui-a11y.sh",
+    "lint:infra": "bash scripts/checks/infra.sh",
+    "lint:theme": "bash scripts/lint-theme-tokens.sh",
     "clean": "rm -rf apps/*/dist apps/*/.vite packages/*/dist",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
@@ -30,6 +39,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.1",
-    "@playwright/test": "^1.58.1"
+    "@playwright/test": "^1.58.1",
+    "husky": "^9.1.7"
   }
 }

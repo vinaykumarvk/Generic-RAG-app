@@ -1,9 +1,12 @@
 import type { ExternalConnector, ConnectorItem } from "./types";
 import { createRetryHandler, type RetryConfig } from "./retry";
 
-export type QueryFn = (text: string, params?: any[]) => Promise<{ rows: any[]; rowCount: number | null }>;
+type QueryRow = Record<string, unknown>;
+type QueryParams = readonly unknown[];
+
+export type QueryFn = (text: string, params?: QueryParams) => Promise<{ rows: QueryRow[]; rowCount: number | null }>;
 export type GetClientFn = () => Promise<{
-  query(text: string, params?: any[]): Promise<{ rows: any[]; rowCount: number | null }>;
+  query(text: string, params?: QueryParams): Promise<{ rows: QueryRow[]; rowCount: number | null }>;
   release(): void;
 }>;
 

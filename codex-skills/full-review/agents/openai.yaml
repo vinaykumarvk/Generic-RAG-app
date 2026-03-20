@@ -1,0 +1,4 @@
+interface:
+  display_name: "Full Engineering Review"
+  short_description: "Run a consolidated cross-domain engineering review"
+  default_prompt: "Use $full-review to run a combined UI, security, quality, infra, and standards review with one final verdict."

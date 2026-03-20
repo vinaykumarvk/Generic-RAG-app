@@ -7,7 +7,7 @@
  */
 
 import { FastifyInstance } from "fastify";
-import type { QueryFn } from "../types";
+import type { QueryFn, RequestUserLike, RequestUserResolver } from "../types";
 import { sendError, send403 } from "../errors";
 
 export interface FeatureToggleRouteDeps {
@@ -15,20 +15,24 @@ export interface FeatureToggleRouteDeps {
   /** Role keys that can manage feature flags */
   adminRoles?: string[];
   /** Extract user from request (varies by app — authUser, user, etc.) */
-  getUser?: (request: any) => any;
+  getUser?: RequestUserResolver;
 }
 
 export function createFeatureToggleRoutes(deps: FeatureToggleRouteDeps) {
-  const { queryFn, adminRoles = ["ADMIN", "SUPER_ADMIN", "SYSTEM_ADMIN"], getUser = (r: any) => r.authUser || r.user } = deps;
+  const {
+    queryFn,
+    adminRoles = ["ADMIN", "SUPER_ADMIN", "SYSTEM_ADMIN"],
+    getUser = (request) => request.authUser || (request.user as RequestUserLike | undefined),
+  } = deps;
 
-  function isAdmin(user: any): boolean {
+  function isAdmin(user: RequestUserLike | undefined): boolean {
     if (!user) return false;
     // Support roles array (flat) or postings array (with system_role_ids)
     if (user.roles?.length) {
       return user.roles.some((r: string) => adminRoles.includes(r));
     }
     if (user.postings?.length) {
-      return user.postings.some((p: any) => {
+      return user.postings.some((p) => {
         const roles = p.system_role_ids || (p.role_key ? [p.role_key] : []);
         return roles.some((r: string) => adminRoles.includes(r));
       });
@@ -94,7 +98,7 @@ export function createFeatureToggleRoutes(deps: FeatureToggleRouteDeps) {
       },
     }, async (request, reply) => {
       const user = getUser(request);
-      if (!isAdmin(user)) return send403(reply, "FORBIDDEN", "Admin access required");
+      if (!user || !isAdmin(user)) return send403(reply, "FORBIDDEN", "Admin access required");
 
       const { key } = request.params as { key: string };
       const { enabled } = request.body as { enabled: boolean };
@@ -103,7 +107,7 @@ export function createFeatureToggleRoutes(deps: FeatureToggleRouteDeps) {
         `UPDATE feature_flag SET enabled = $1, updated_at = now(), updated_by_user_id = $2
          WHERE flag_key = $3 AND is_archived = FALSE
          RETURNING flag_key, enabled, description, updated_at`,
-        [enabled, user.userId || user.user_id, key],
+        [enabled, user.userId ?? user.user_id, key],
       );
 
       if (result.rows.length === 0) {

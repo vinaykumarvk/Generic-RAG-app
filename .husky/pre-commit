@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Pre-commit hook: run lint checks on staged files only.
+# Blocks commit if any check has MORE violations than the baseline.
+bash scripts/lint-all.sh --staged

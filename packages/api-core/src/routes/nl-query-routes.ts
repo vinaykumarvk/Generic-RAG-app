@@ -6,7 +6,7 @@
  */
 
 import { FastifyInstance } from "fastify";
-import type { QueryFn } from "../types";
+import type { QueryFn, RequestUserLike, RequestUserResolver } from "../types";
 import type { LlmProvider } from "../llm/llm-provider";
 import { sendError } from "../errors";
 import { logInfo, logWarn, logError } from "../logging/logger";
@@ -29,7 +29,7 @@ export interface NlQueryRouteDeps {
   /** Optional SQL WHERE restrictions based on user role */
   scopeRestrictions?: (userId: string, roles: string[]) => string;
   /** Extract user from request (varies by app — authUser, user, etc.) */
-  getUser?: (request: any) => any;
+  getUser?: RequestUserResolver;
 }
 
 const SELECT_ONLY_RE = /^\s*(SELECT|WITH)\b/i;
@@ -40,7 +40,15 @@ const MULTI_STATEMENT_RE = /;\s*\S/;
 const SELECT_INTO_RE = /\bSELECT\b[^;]*\bINTO\b/i;
 
 export function createNlQueryRoutes(deps: NlQueryRouteDeps) {
-  const { queryFn, llmProvider, queryPatterns, dbSchemaContext, appId, scopeRestrictions, getUser = (r: any) => r.authUser || r.user } = deps;
+  const {
+    queryFn,
+    llmProvider,
+    queryPatterns,
+    dbSchemaContext,
+    appId,
+    scopeRestrictions,
+    getUser = (request) => request.authUser || (request.user as RequestUserLike | undefined),
+  } = deps;
 
   return async function registerNlQueryRoutes(app: FastifyInstance): Promise<void> {
     // ── POST /api/v1/query ─────────────────────────────────────────────────
@@ -58,6 +66,8 @@ export function createNlQueryRoutes(deps: NlQueryRouteDeps) {
     }, async (request, reply) => {
       const user = getUser(request);
       if (!user) return sendError(reply, 401, "UNAUTHORIZED", "Authentication required");
+      const userId = user.userId ?? user.user_id;
+      if (!userId) return sendError(reply, 401, "UNAUTHORIZED", "Authentication required");
 
       const { question } = request.body as { question: string };
       const startTime = Date.now();
@@ -66,9 +76,9 @@ export function createNlQueryRoutes(deps: NlQueryRouteDeps) {
       const llmAvailable = await llmProvider.isLlmAvailable();
       if (llmAvailable) {
         try {
-          const result = await llmGenerateAndExecute(question, user.userId || user.user_id, user.roles || []);
+          const result = await llmGenerateAndExecute(question, userId, user.roles || []);
           if (result) {
-            await logQuery(user.userId || user.user_id, question, result.sql, result.summary, result.citations, "LLM", Date.now() - startTime);
+            await logQuery(userId, question, result.sql, result.summary, result.citations, "LLM", Date.now() - startTime);
             return {
               summary: result.summary,
               data: result.data,
@@ -99,7 +109,7 @@ export function createNlQueryRoutes(deps: NlQueryRouteDeps) {
               });
               const result = await queryFn(sql, captureGroups);
               const summary = `Found ${result.rows.length} result(s) matching: ${pattern.description}`;
-              await logQuery(user.userId || user.user_id, question, sql, summary, [], "REGEX", Date.now() - startTime);
+              await logQuery(userId, question, sql, summary, [], "REGEX", Date.now() - startTime);
               return {
                 summary,
                 data: result.rows,

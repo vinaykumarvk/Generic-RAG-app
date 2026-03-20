@@ -4,6 +4,21 @@ type ErrorReporter = {
   setUser: (user: { id: string; email?: string } | null) => void;
 };
 
+type ViteMetaEnv = {
+  VITE_SENTRY_DSN?: string;
+};
+
+type SentryLike = {
+  captureException: (error: unknown, context?: { extra?: Record<string, unknown> }) => void;
+  captureMessage: (message: string, level?: "info" | "warning" | "error") => void;
+  setUser: (user: { id: string; email?: string } | null) => void;
+};
+
+type ErrorReportingGlobal = typeof globalThis & {
+  __VITE_META_ENV__?: ViteMetaEnv;
+  __SENTRY__?: SentryLike;
+};
+
 let reporter: ErrorReporter | null = null;
 
 function noopReporter(): ErrorReporter {
@@ -21,14 +36,15 @@ export function initErrorReporting(options: {
   app: string;
 }): ErrorReporter {
   // globalThis.__VITE_ENV__ is set by Vite; avoid import.meta for CJS compat
-  const viteMeta = typeof globalThis !== "undefined" ? (globalThis as any).__VITE_META_ENV__ : undefined;
+  const runtimeGlobal = globalThis as ErrorReportingGlobal;
+  const viteMeta = typeof globalThis !== "undefined" ? runtimeGlobal.__VITE_META_ENV__ : undefined;
   const dsn = options.dsn || viteMeta?.VITE_SENTRY_DSN;
   if (!dsn) {
     reporter = noopReporter();
     return reporter;
   }
 
-  const Sentry = (globalThis as any).__SENTRY__;
+  const Sentry = runtimeGlobal.__SENTRY__;
   if (Sentry) {
     reporter = {
       captureException: (error, context) => {

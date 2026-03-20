@@ -12,6 +12,9 @@ export interface LexicalSearchResult {
   chunk_type: string;
   page_start: number | null;
   document_title: string;
+  case_reference?: string | null;
+  fir_number?: string | null;
+  station_code?: string | null;
 }
 
 export async function lexicalSearch(
@@ -19,7 +22,7 @@ export async function lexicalSearch(
   workspaceId: string,
   query: string,
   maxResults: number,
-  filters?: { documentIds?: string[]; categories?: string[] },
+  filters?: { documentIds?: string[]; categories?: string[]; case_reference?: string },
 ): Promise<{ results: LexicalSearchResult[]; latencyMs: number }> {
   const start = Date.now();
 
@@ -50,6 +53,9 @@ export async function lexicalSearch(
   const result = await queryFn(
     `SELECT c.chunk_id, c.document_id, c.content, c.chunk_type, c.page_start,
             d.title as document_title,
+            d.case_reference,
+            d.fir_number,
+            d.station_code,
             ts_rank(c.fts_vector, to_tsquery('english', $1)) as rank
      FROM chunk c
      JOIN document d ON d.document_id = c.document_id

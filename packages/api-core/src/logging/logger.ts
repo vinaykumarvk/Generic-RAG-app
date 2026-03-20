@@ -14,9 +14,11 @@ function write(level: LogLevel, message: string, fields?: LogFields): void {
     ...(fields ? (redactValue(fields) as LogFields) : {}),
   };
   const line = JSON.stringify(payload);
-  if (level === "error") { console.error(line); return; }
-  if (level === "warn") { console.warn(line); return; }
-  console.log(line);
+  if (level === "error" || level === "warn") {
+    process.stderr.write(`${line}\n`);
+    return;
+  }
+  process.stdout.write(`${line}\n`);
 }
 
 export function logInfo(message: string, fields?: LogFields): void { write("info", message, fields); }

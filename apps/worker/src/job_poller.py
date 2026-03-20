@@ -1,5 +1,6 @@
 """Job poller — polls ingestion_job with SELECT FOR UPDATE SKIP LOCKED."""
 
+import json
 import time
 import logging
 import traceback
@@ -10,21 +11,28 @@ from .pipeline.normalizer import normalize_document
 from .pipeline.chunker import chunk_document
 from .pipeline.embedder import embed_chunks
 from .pipeline.kg_extractor import extract_kg
+from .pipeline.converter import convert_document
+from .pipeline.metadata_extractor import extract_metadata
 
 logger = logging.getLogger(__name__)
 
 STEP_HANDLERS = {
     "VALIDATE": validate_document,
     "NORMALIZE": normalize_document,
+    "CONVERT": convert_document,
+    "METADATA_EXTRACT": extract_metadata,
     "CHUNK": chunk_document,
     "EMBED": embed_chunks,
     "KG_EXTRACT": extract_kg,
 }
 
 # State transition map: step → (next_step, doc_status_after_step, doc_status_during_next)
+# FR-007: METADATA_EXTRACT inserted after NORMALIZE/CONVERT
 STEP_TRANSITIONS = {
     "VALIDATE": ("NORMALIZE", "VALIDATING", "NORMALIZING"),
-    "NORMALIZE": ("CHUNK", "NORMALIZING", "CHUNKING"),
+    "NORMALIZE": ("CONVERT", "NORMALIZING", "CONVERTING"),
+    "CONVERT": ("METADATA_EXTRACT", "CONVERTING", "METADATA_EXTRACTING"),
+    "METADATA_EXTRACT": ("CHUNK", "METADATA_EXTRACTING", "CHUNKING"),
     "CHUNK": ("EMBED", "CHUNKING", "EMBEDDING"),
     "EMBED": (None, "EMBEDDING", "SEARCHABLE"),
 }
@@ -35,7 +43,7 @@ def poll_once():
     with get_connection() as conn:
         with get_cursor(conn) as cur:
             cur.execute("""
-                SELECT job_id, document_id, workspace_id, step, attempt, max_attempts
+                SELECT job_id, document_id, workspace_id, step, attempt, max_attempts, metadata
                 FROM ingestion_job
                 WHERE status IN ('PENDING', 'RETRYING')
                   AND (locked_until IS NULL OR locked_until < now())
@@ -53,6 +61,13 @@ def poll_once():
             workspace_id = job["workspace_id"]
             step = job["step"]
             attempt = job["attempt"] + 1
+            # Propagate job metadata (e.g. chunking_strategy) to subsequent steps
+            job_metadata = job.get("metadata") or {}
+            if isinstance(job_metadata, str):
+                try:
+                    job_metadata = json.loads(job_metadata)
+                except (json.JSONDecodeError, TypeError):
+                    job_metadata = {}
 
             logger.info(f"Processing job {job_id}: step={step}, doc={doc_id}, attempt={attempt}")
 
@@ -98,21 +113,22 @@ def poll_once():
                     cur.execute("UPDATE document SET status = %s, updated_at = now() WHERE document_id = %s",
                                (next_doc_status, doc_id))
 
-                    # Create next job if there's a next step
+                    # Create next job if there's a next step (propagate metadata for chunking_strategy etc.)
+                    metadata_json = json.dumps(job_metadata) if job_metadata else "{}"
                     if next_step:
                         cur.execute("""
-                            INSERT INTO ingestion_job (document_id, workspace_id, step, status)
-                            VALUES (%s, %s, %s, 'PENDING')
-                        """, (doc_id, workspace_id, next_step))
+                            INSERT INTO ingestion_job (document_id, workspace_id, step, status, metadata)
+                            VALUES (%s, %s, %s, 'PENDING', %s)
+                        """, (doc_id, workspace_id, next_step, metadata_json))
                     else:
                         # Check if KG extraction is enabled
                         cur.execute("SELECT enabled FROM feature_flag WHERE name = 'kg_extraction'")
                         flag = cur.fetchone()
                         if flag and flag["enabled"]:
                             cur.execute("""
-                                INSERT INTO ingestion_job (document_id, workspace_id, step, status)
-                                VALUES (%s, %s, 'KG_EXTRACT', 'PENDING')
-                            """, (doc_id, workspace_id))
+                                INSERT INTO ingestion_job (document_id, workspace_id, step, status, metadata)
+                                VALUES (%s, %s, 'KG_EXTRACT', 'PENDING', %s)
+                            """, (doc_id, workspace_id, metadata_json))
                             cur.execute("UPDATE document SET status = 'KG_EXTRACTING', updated_at = now() WHERE document_id = %s",
                                        (doc_id,))
 

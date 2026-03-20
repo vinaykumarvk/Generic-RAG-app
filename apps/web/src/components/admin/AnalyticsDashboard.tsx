@@ -23,10 +23,10 @@ export function AnalyticsDashboard({ workspaceId }: { workspaceId: string }) {
   if (isLoading || !data) return null;
 
   const cards = [
-    { label: "Total Queries", value: data.cache.total, icon: BarChart3, color: "text-blue-600" },
-    { label: "Avg Latency", value: `${data.latency.avg_ms}ms`, icon: Clock, color: "text-amber-600" },
-    { label: "P95 Latency", value: `${data.latency.p95_ms}ms`, icon: Zap, color: "text-red-600" },
-    { label: "Cache Hit Rate", value: `${(data.cache.hit_rate * 100).toFixed(0)}%`, icon: Database, color: "text-green-600" },
+    { label: "Total Queries", value: data.cache.total, icon: BarChart3, color: "text-primary-600" },
+    { label: "Avg Latency", value: `${data.latency.avg_ms}ms`, icon: Clock, color: "text-warning" },
+    { label: "P95 Latency", value: `${data.latency.p95_ms}ms`, icon: Zap, color: "text-danger" },
+    { label: "Cache Hit Rate", value: `${(data.cache.hit_rate * 100).toFixed(0)}%`, icon: Database, color: "text-success" },
   ];
 
   return (
@@ -34,10 +34,10 @@ export function AnalyticsDashboard({ workspaceId }: { workspaceId: string }) {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {cards.map(({ label, value, icon: Icon, color }) => (
-          <div key={label} className="bg-white border border-gray-200 rounded-xl p-4">
+          <div key={label} className="bg-surface border border-skin rounded-xl p-4">
             <div className="flex items-center gap-2 mb-2">
               <Icon size={16} className={color} />
-              <span className="text-xs text-gray-500 font-medium">{label}</span>
+              <span className="text-xs text-skin-muted font-medium">{label}</span>
             </div>
             <p className="text-2xl font-bold">{value}</p>
           </div>
@@ -45,62 +45,62 @@ export function AnalyticsDashboard({ workspaceId }: { workspaceId: string }) {
       </div>
 
       {/* Feedback summary */}
-      <div className="bg-white border border-gray-200 rounded-xl p-5">
+      <div className="bg-surface border border-skin rounded-xl p-5">
         <h3 className="font-semibold mb-3">Feedback</h3>
         <div className="flex gap-6">
           <div className="flex items-center gap-2">
-            <ThumbsUp size={18} className="text-green-500" />
+            <ThumbsUp size={18} className="text-success" />
             <span className="text-lg font-bold">{data.feedback.thumbs_up}</span>
           </div>
           <div className="flex items-center gap-2">
-            <ThumbsDown size={18} className="text-red-500" />
+            <ThumbsDown size={18} className="text-danger" />
             <span className="text-lg font-bold">{data.feedback.thumbs_down}</span>
           </div>
-          <div className="text-sm text-gray-500">
+          <div className="text-sm text-skin-muted">
             {data.feedback.total} total feedback entries
           </div>
         </div>
       </div>
 
       {/* Top questions */}
-      <div className="bg-white border border-gray-200 rounded-xl p-5">
+      <div className="bg-surface border border-skin rounded-xl p-5">
         <h3 className="font-semibold mb-3">Top Questions</h3>
         <div className="space-y-2">
           {data.top_questions.map((q, i) => (
             <div key={i} className="flex items-center justify-between text-sm">
-              <span className="truncate flex-1 text-gray-700">{q.original_query}</span>
-              <span className="text-gray-400 ml-4 shrink-0">{q.count}x</span>
+              <span className="truncate flex-1 text-skin-base">{q.original_query}</span>
+              <span className="text-skin-muted ml-4 shrink-0">{q.count}x</span>
             </div>
           ))}
-          {data.top_questions.length === 0 && <p className="text-sm text-gray-400">No queries yet</p>}
+          {data.top_questions.length === 0 && <p className="text-sm text-skin-muted">No queries yet</p>}
         </div>
       </div>
 
       {/* LLM Usage */}
-      <div className="bg-white border border-gray-200 rounded-xl p-5">
+      <div className="bg-surface border border-skin rounded-xl p-5">
         <h3 className="font-semibold mb-3">LLM Usage</h3>
         <div className="space-y-2">
           {data.llm_usage.map((u, i) => (
             <div key={i} className="flex items-center justify-between text-sm">
               <span className="font-medium">{u.provider}/{u.model_name}</span>
-              <span className="text-gray-500">{u.calls} calls, avg {Math.round(u.avg_latency)}ms</span>
+              <span className="text-skin-muted">{u.calls} calls, avg {Math.round(u.avg_latency)}ms</span>
             </div>
           ))}
-          {data.llm_usage.length === 0 && <p className="text-sm text-gray-400">No LLM usage yet</p>}
+          {data.llm_usage.length === 0 && <p className="text-sm text-skin-muted">No LLM usage yet</p>}
         </div>
       </div>
 
       {/* Document stats */}
-      <div className="bg-white border border-gray-200 rounded-xl p-5">
+      <div className="bg-surface border border-skin rounded-xl p-5">
         <h3 className="font-semibold mb-3">Document Status</h3>
         <div className="flex gap-4 flex-wrap">
           {data.document_stats.map(({ status, count }) => (
             <div key={status} className="text-sm">
               <span className="font-medium">{count}</span>
-              <span className="text-gray-500 ml-1">{status}</span>
+              <span className="text-skin-muted ml-1">{status}</span>
             </div>
           ))}
-          {data.document_stats.length === 0 && <p className="text-sm text-gray-400">No documents</p>}
+          {data.document_stats.length === 0 && <p className="text-sm text-skin-muted">No documents</p>}
         </div>
       </div>
     </div>

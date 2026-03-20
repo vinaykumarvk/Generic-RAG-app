@@ -1,6 +1,9 @@
 import type { ConnectorItem } from "./types";
 
-export type QueryFn = (text: string, params?: any[]) => Promise<{ rows: any[]; rowCount: number | null }>;
+type QueryRow = Record<string, unknown>;
+type QueryParams = readonly unknown[];
+
+export type QueryFn = (text: string, params?: QueryParams) => Promise<{ rows: QueryRow[]; rowCount: number | null }>;
 
 export interface DeadLetterConfig {
   queryFn: QueryFn;
@@ -22,9 +25,9 @@ export function createDeadLetterQueue(config: DeadLetterConfig) {
     );
   }
 
-  async function listFailed(limit = 50, offset = 0): Promise<{ items: any[]; total: number }> {
+  async function listFailed(limit = 50, offset = 0): Promise<{ items: QueryRow[]; total: number }> {
     const countResult = await queryFn(`SELECT COUNT(*)::int AS total FROM ${tableName}`);
-    const total = countResult.rows[0]?.total || 0;
+    const total = Number(countResult.rows[0]?.total || 0);
     const result = await queryFn(
       `SELECT * FROM ${tableName} ORDER BY failed_at DESC LIMIT $1 OFFSET $2`,
       [limit, offset],

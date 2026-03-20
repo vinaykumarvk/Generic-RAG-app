@@ -16,7 +16,7 @@ export interface DashboardFilters {
 
 export interface FilterResult {
   whereClause: string;
-  params: any[];
+  params: unknown[];
   paramOffset: number;
 }
 
@@ -38,7 +38,7 @@ export function buildFilterClauses(
   startParamIndex = 1,
 ): FilterResult {
   const conditions: string[] = [];
-  const params: any[] = [];
+  const params: unknown[] = [];
   let paramIdx = startParamIndex;
 
   if (filters.dateFrom) {

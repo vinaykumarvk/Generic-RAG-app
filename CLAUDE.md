@@ -24,9 +24,23 @@ npm run build:all
 # Typecheck
 npm run typecheck
 
+# Lint: all coding-standards checks (21 rules, baseline ratchet)
+npm run lint                # full scan — fails on regressions from baseline
+npm run lint:staged         # staged files only (used by pre-commit hook)
+npm run lint:baseline       # ratchet baseline down after fixing violations
+npm run lint:security       # security checks only (SEC-*)
+npm run lint:quality        # quality checks only (QUA-*)
+npm run lint:ui             # UI/a11y checks only (UID-*/UIA-*/UIT-*)
+npm run lint:infra          # infra checks only (INF-*)
+npm run lint:theme          # theme token violations (standalone, human-readable)
+
 # Clean build artifacts
 npm run clean
 ```
+
+### Lint Baseline Ratchet
+
+The lint system uses a **baseline ratchet** (`scripts/.lint-baseline.json`). Commits are blocked only if a check's violation count *increases* beyond baseline. After fixing violations, run `npm run lint:baseline` to ratchet the baseline down. The pre-commit hook (`husky`) runs `lint:staged` automatically.
 
 ## Dev Commands
 
@@ -122,6 +136,51 @@ Located in `apps/api/src/migrations/`:
 - `007_conversations.sql` — Conversations, messages, retrieval runs, citations, answer cache
 - `008_knowledge_graph.sql` — Graph nodes with description embeddings, edges with evidence
 - `009_feedback_analytics.sql` — Feedback, notification events
+
+## Coding Standards (apply proactively when writing code)
+
+Full reference: `.claude/coding-standards.md` (216 rules). The critical subset below MUST be followed when writing any code — not just during review.
+
+### Security — NEVER do these
+- **SQL injection**: Always use parameterized queries (`$1`, `$2`). Never concatenate/interpolate user input into SQL.
+- **No `eval()`/`exec()`/`spawn()`** with user input. No `dangerouslySetInnerHTML` without DOMPurify.
+- **No hardcoded secrets** in source code, Dockerfiles, or CI configs. `.env` in `.gitignore`.
+- **Auth tokens in httpOnly+secure+sameSite cookies only** — never localStorage.
+- **Every mutation endpoint has authorization checks**. Read endpoints filter by user scope. No IDOR.
+- **No sensitive data in logs** (passwords, tokens, PII). Use structured logger, not `console.log`.
+- **File paths from user input**: validate and sandbox — no `../` traversal. Use generated filenames for uploads.
+
+### Code Quality — ALWAYS do these
+- **No `any` or `as any`** in new code. Use `unknown` + type narrowing.
+- **Validate all API inputs** with Zod schemas server-side before processing.
+- **Error handling on every async operation**. Never swallow errors silently. Use project helpers (`send400()`, `send404()`).
+- **No N+1 queries**. Use JOINs or `WHERE id = ANY($1)`. Transactions for multi-step mutations.
+- **All list endpoints have LIMIT/pagination**. No unbounded queries.
+- **Migrations**: idempotent (`IF NOT EXISTS`), backward-compatible.
+- **Import via workspace aliases** (`@puda/shared`, `@puda/api-core`), not relative paths into `packages/`.
+- **Functions <= 50 lines, files <= 500 lines**. No commented-out code. Remove dead imports.
+
+### UI/UX & Accessibility (WCAG 2.1 AA) — ALWAYS do these
+- **No `<div onClick>`** — use semantic `<button>` or `<a>`. Icon-only buttons need `aria-label`.
+- **Buttons specify `type="button"` or `type="submit"`** explicitly.
+- **Decorative SVGs**: `aria-hidden="true"`. All `<img>` have `alt`.
+- **Every data component has loading, empty, and error states**. Search/filter "no results" is distinct from data-empty.
+- **Submit buttons disabled with loading indicator** during submission (double-submit prevention).
+- **Confirmation dialogs use explicit action labels** (e.g., "Delete workspace") — never generic "OK".
+- **No hardcoded hex/rgb colors or pixel spacing** — use CSS variables/design tokens. Applies to dark mode too.
+- **Responsive**: use `100dvh` not `100vh`, breakpoints in `rem`, no fixed px widths >= 100px.
+- **Data tables**: semantic `<table>`/`<th scope="col">` on desktop, but mobile must reflow dense row data into stacked cards instead of relying on horizontal scroll. Keep table empty state and selection/actions usable in both layouts.
+- **Modals**: focus trapped, Escape to close, focus returns to trigger on close, `aria-labelledby` on heading.
+- **Search inputs**: debounce 300-500ms, clear button, `type="search"`.
+- **`credentials: "include"`** on all fetch calls to own API.
+- **Route-level code splitting** with `React.lazy` + `Suspense`.
+
+### Infrastructure — ALWAYS do these
+- **Dockerfiles**: non-root user, pinned base image versions, multi-stage builds, `npm ci`.
+- **Graceful shutdown**: SIGTERM/SIGINT handlers drain requests, close DB connections.
+- **Health/readiness endpoints** verify actual dependencies.
+- **Env var validation at startup** — throw on missing required vars.
+- **Structured JSON logs** with consistent fields (timestamp, level, service, message).
 
 ## Notes
 

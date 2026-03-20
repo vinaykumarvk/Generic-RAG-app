@@ -1,0 +1,92 @@
+# ─── Stage 1: Install dependencies ───
+FROM node:20-slim AS deps
+
+WORKDIR /app
+
+# Copy root workspace config and lockfile
+COPY package.json package-lock.json ./
+
+# Copy all workspace package.json files
+COPY packages/shared/package.json packages/shared/
+COPY packages/workflow-engine/package.json packages/workflow-engine/
+COPY packages/api-core/package.json packages/api-core/
+COPY packages/api-integrations/package.json packages/api-integrations/
+COPY apps/api/package.json apps/api/
+
+# Install all dependencies (dev + prod needed for build)
+RUN npm ci --ignore-scripts
+
+# ─── Stage 2: Build ───
+FROM deps AS build
+
+WORKDIR /app
+
+# Copy package source code
+COPY packages/shared/tsconfig.json packages/shared/
+COPY packages/shared/src/ packages/shared/src/
+COPY packages/workflow-engine/tsconfig.json packages/workflow-engine/
+COPY packages/workflow-engine/src/ packages/workflow-engine/src/
+COPY packages/api-core/tsconfig.json packages/api-core/
+COPY packages/api-core/src/ packages/api-core/src/
+COPY packages/api-integrations/tsconfig.json packages/api-integrations/
+COPY packages/api-integrations/src/ packages/api-integrations/src/
+
+# Copy API source code
+COPY apps/api/tsconfig.json apps/api/
+COPY apps/api/src/ apps/api/src/
+
+# Copy root tsconfig for extends
+COPY tsconfig.base.json ./
+
+# Build packages in dependency order, then API
+RUN npm --workspace packages/shared run build && \
+    npm --workspace packages/workflow-engine run build && \
+    npm --workspace packages/api-core run build && \
+    npm --workspace packages/api-integrations run build && \
+    npm --workspace apps/api run build
+
+# ─── Stage 3: Production ───
+FROM node:20-slim AS production
+
+RUN apt-get update && apt-get install -y --no-install-recommends dumb-init && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy root workspace config and lockfile
+COPY package.json package-lock.json ./
+
+# Copy workspace package.json files for production install
+COPY packages/shared/package.json packages/shared/
+COPY packages/workflow-engine/package.json packages/workflow-engine/
+COPY packages/api-core/package.json packages/api-core/
+COPY packages/api-integrations/package.json packages/api-integrations/
+COPY apps/api/package.json apps/api/
+
+# Install production dependencies only
+RUN npm ci --omit=dev --ignore-scripts
+
+# Copy built packages
+COPY --from=build /app/packages/shared/dist/ packages/shared/dist/
+COPY --from=build /app/packages/workflow-engine/dist/ packages/workflow-engine/dist/
+COPY --from=build /app/packages/api-core/dist/ packages/api-core/dist/
+COPY --from=build /app/packages/api-integrations/dist/ packages/api-integrations/dist/
+COPY --from=build /app/apps/api/dist/ apps/api/dist/
+
+# Copy migration SQL files (needed at runtime by migrate-runner)
+COPY apps/api/src/migrations/ apps/api/dist/migrations/
+
+# Create uploads directory for local storage
+RUN mkdir -p /app/uploads
+
+# Non-root user
+RUN addgroup --system --gid 1001 appgroup && \
+    adduser --system --uid 1001 --ingroup appgroup appuser && \
+    chown -R appuser:appgroup /app/uploads
+USER appuser
+
+ENV NODE_ENV=production
+ENV PORT=8080
+EXPOSE 8080
+
+CMD ["dumb-init", "node", "apps/api/dist/index.js"]

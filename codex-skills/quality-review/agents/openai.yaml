@@ -1,0 +1,4 @@
+interface:
+  display_name: "Quality Review"
+  short_description: "Review feature completeness and code quality"
+  default_prompt: "Use $quality-review to assess functional completeness, API quality, and maintainability."

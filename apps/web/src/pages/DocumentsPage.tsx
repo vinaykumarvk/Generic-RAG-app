@@ -8,8 +8,8 @@ export function DocumentsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-gray-900">Documents</h2>
-        <p className="text-gray-500 text-sm mt-1">Upload and manage your knowledge base documents</p>
+        <h2 className="text-2xl font-bold text-skin-base">Documents</h2>
+        <p className="text-skin-muted text-sm mt-1">Upload and manage your knowledge base documents</p>
       </div>
 
       <DocumentUpload workspaceId={workspaceId!} />

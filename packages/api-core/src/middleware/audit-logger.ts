@@ -86,9 +86,8 @@ export function createAuditLogger(config: AuditLoggerConfig) {
       }
 
       try {
-
-        const actorId = (request as any).authUser?.userId ?? "00000000-0000-0000-0000-000000000000";
-        const actorRole = (request as any).authUser?.roles?.join(",") || null;
+        const actorId = request.authUser?.userId ?? "00000000-0000-0000-0000-000000000000";
+        const actorRole = request.authUser?.roles?.join(",") || null;
         const { entityType, entityId } = extractEntityInfo(request.url);
 
         let payloadSummary: string | null = null;

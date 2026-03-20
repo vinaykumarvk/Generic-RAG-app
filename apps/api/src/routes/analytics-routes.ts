@@ -2,7 +2,8 @@
  * Analytics routes — /api/v1/workspaces/:wid/analytics
  */
 
-import { FastifyInstance } from "fastify";
+import { FastifyInstance, FastifyReply } from "fastify";
+import { sendError, logError } from "@puda/api-core";
 import type { QueryFn } from "@puda/api-core";
 
 export function createAnalyticsRoutes(app: FastifyInstance, deps: { queryFn: QueryFn }) {
@@ -15,7 +16,7 @@ export function createAnalyticsRoutes(app: FastifyInstance, deps: { queryFn: Que
       const { wid } = request.params;
       const days = Math.min(90, Math.max(1, parseInt(request.query.days || "30", 10)));
 
-      const [queries, latency, cacheHits, avgRating, topQuestions, llmUsage, docStats] = await Promise.all([
+      const [queries, latency, cacheHits, avgRating, topQuestions, llmUsage, docStats, fileTypeStats, ocrStats] = await Promise.all([
         // Queries per day
         queryFn(
           `SELECT date_trunc('day', created_at)::date as day, count(*) as count
@@ -66,6 +67,22 @@ export function createAnalyticsRoutes(app: FastifyInstance, deps: { queryFn: Que
            GROUP BY status`,
           [wid]
         ),
+        // File type distribution
+        queryFn(
+          `SELECT mime_type, count(*) as count
+           FROM document WHERE workspace_id = $1 AND status != 'DELETED'
+           GROUP BY mime_type ORDER BY count DESC`,
+          [wid]
+        ),
+        // FR-020: OCR rate metric
+        queryFn(
+          `SELECT
+             count(*) FILTER (WHERE review_required = true) as ocr_flagged,
+             count(*) as total,
+             avg(metadata_confidence) as avg_metadata_confidence
+           FROM document WHERE workspace_id = $1 AND status != 'DELETED'`,
+          [wid]
+        ),
       ]);
 
       const totalQueries = parseInt(cacheHits.rows[0]?.total || "0", 10);
@@ -92,7 +109,105 @@ export function createAnalyticsRoutes(app: FastifyInstance, deps: { queryFn: Que
         top_questions: topQuestions.rows,
         llm_usage: llmUsage.rows,
         document_stats: docStats.rows,
+        file_type_stats: fileTypeStats.rows,
+        ocr: {
+          flagged_for_review: parseInt(ocrStats.rows[0]?.ocr_flagged || "0", 10),
+          total_documents: parseInt(ocrStats.rows[0]?.total || "0", 10),
+          avg_metadata_confidence: parseFloat(ocrStats.rows[0]?.avg_metadata_confidence || "0"),
+        },
       };
+    }
+  );
+
+  // Gap #53 (FR-025/AC-01): Query volume per day
+  app.get<{ Params: { wid: string }; Querystring: { days?: string } }>(
+    "/api/v1/workspaces/:wid/analytics/query-volume",
+    async (request, reply: FastifyReply) => {
+      try {
+        const { wid } = request.params;
+        const days = Math.min(90, Math.max(1, parseInt(request.query.days || "30", 10)));
+
+        const result = await queryFn(
+          `SELECT date_trunc('day', created_at)::date as day, count(*)::int as count
+           FROM retrieval_run
+           WHERE workspace_id = $1 AND created_at >= now() - $2::int * interval '1 day'
+           GROUP BY day ORDER BY day`,
+          [wid, days]
+        );
+
+        return { period_days: days, data: result.rows };
+      } catch (err) {
+        logError("Failed to fetch query volume", { error: String(err) });
+        return sendError(reply, 500, "ANALYTICS_ERROR", "Failed to fetch query volume");
+      }
+    }
+  );
+
+  // Gap #54 (FR-025/AC-02): Cache analytics detail
+  app.get<{ Params: { wid: string } }>(
+    "/api/v1/workspaces/:wid/analytics/cache-stats",
+    async (request, reply: FastifyReply) => {
+      try {
+        const { wid } = request.params;
+
+        const [sizeResult, topHitsResult] = await Promise.all([
+          queryFn(
+            `SELECT count(*)::int as total_entries FROM answer_cache WHERE workspace_id = $1`,
+            [wid]
+          ),
+          queryFn(
+            `SELECT query_text, hit_count::int as hit_count
+             FROM answer_cache WHERE workspace_id = $1
+             ORDER BY hit_count DESC LIMIT 10`,
+            [wid]
+          ),
+        ]);
+
+        return {
+          total_entries: sizeResult.rows[0]?.total_entries ?? 0,
+          most_hit_queries: topHitsResult.rows,
+        };
+      } catch (err) {
+        logError("Failed to fetch cache stats", { error: String(err) });
+        return sendError(reply, 500, "ANALYTICS_ERROR", "Failed to fetch cache stats");
+      }
+    }
+  );
+
+  // Gap #55 (FR-025/AC-03): User analytics
+  app.get<{ Params: { wid: string } }>(
+    "/api/v1/workspaces/:wid/analytics/users",
+    async (request, reply: FastifyReply) => {
+      try {
+        const { wid } = request.params;
+
+        const [activeUsersResult, queriesPerUserResult] = await Promise.all([
+          queryFn(
+            `SELECT count(DISTINCT user_id)::int as active_users
+             FROM retrieval_run
+             WHERE workspace_id = $1 AND created_at >= now() - interval '30 days'`,
+            [wid]
+          ),
+          queryFn(
+            `SELECT u.display_name, u.email, count(*)::int as query_count
+             FROM retrieval_run rr
+             JOIN app_user u ON u.user_id = rr.user_id
+             WHERE rr.workspace_id = $1 AND rr.created_at >= now() - interval '30 days'
+             GROUP BY u.user_id, u.display_name, u.email
+             ORDER BY query_count DESC
+             LIMIT 10`,
+            [wid]
+          ),
+        ]);
+
+        return {
+          active_users_30d: activeUsersResult.rows[0]?.active_users ?? 0,
+          top_users: queriesPerUserResult.rows,
+        };
+      } catch (err) {
+        logError("Failed to fetch user analytics", { error: String(err) });
+        return sendError(reply, 500, "ANALYTICS_ERROR", "Failed to fetch user analytics");
+      }
     }
   );
 }

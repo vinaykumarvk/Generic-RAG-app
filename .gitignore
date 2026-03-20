@@ -26,3 +26,8 @@ playwright-report/
 
 # Bundle reports
 frontend-bundle-report.json
+
+# Python
+**/.venv/
+**/__pycache__/
+*.pyc

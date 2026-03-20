@@ -44,6 +44,9 @@ function createMockApp() {
     delete: vi.fn((path: string, handler: any) => {
       routes.push({ method: "DELETE", path, handler });
     }),
+    patch: vi.fn((path: string, handler: any) => {
+      routes.push({ method: "PATCH", path, handler });
+    }),
     _routes: routes,
     findRoute(method: string, path: string) {
       return routes.find((r) => r.method === method && r.path === path);
@@ -86,6 +89,12 @@ describe("document-routes", () => {
   let queryFn: ReturnType<typeof createMockQueryFn>;
   let getClient: any;
   let llmProvider: any;
+  let storageProvider: {
+    upload: ReturnType<typeof vi.fn>;
+    download: ReturnType<typeof vi.fn>;
+    delete: ReturnType<typeof vi.fn>;
+    getSignedUrl: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -94,7 +103,11 @@ describe("document-routes", () => {
     getClient = vi.fn();
     llmProvider = {};
 
-    createDocumentRoutes(app as any, { queryFn, getClient, llmProvider });
+    storageProvider = {
+      upload: vi.fn().mockResolvedValue({ filePath: "/uploads/test-file", gcsUri: null }),
+      download: vi.fn(), delete: vi.fn(), getSignedUrl: vi.fn(),
+    };
+    createDocumentRoutes(app as any, { queryFn, getClient, llmProvider, storageProvider });
   });
 
   describe("TC-FR001-01: List documents with pagination", () => {
@@ -186,6 +199,7 @@ describe("document-routes", () => {
 
       const request = {
         params: { wid: "ws-1" },
+        query: {},
         parts: () => parts,
         authUser: { user_id: "user-1" },
       };
@@ -202,6 +216,71 @@ describe("document-routes", () => {
       );
       expect(ingestionCall).toBeDefined();
       expect(ingestionCall![1][1]).toBe("ws-1");
+    });
+  });
+
+  describe("Pipeline inspection routes", () => {
+    it("returns the latest extracted text for a document", async () => {
+      const route = app.findRoute("GET", "/api/v1/workspaces/:wid/documents/:id/extracted-text");
+      expect(route).toBeDefined();
+
+      queryFn.mockResolvedValueOnce({ rows: [{ document_id: "doc-1" }], rowCount: 1 });
+      queryFn.mockResolvedValueOnce({
+        rows: [{
+          extraction_id: "ext-1",
+          extraction_type: "TEXT",
+          content: "normalized content",
+          metadata: { page_count: 3 },
+        }],
+        rowCount: 1,
+      });
+
+      const result = await route!.handler({ params: { wid: "ws-1", id: "doc-1" } }, createMockReply());
+
+      expect(result.extracted_text?.content).toBe("normalized content");
+      expect(queryFn).toHaveBeenCalledTimes(2);
+    });
+
+    it("returns ordered chunks for a document", async () => {
+      const route = app.findRoute("GET", "/api/v1/workspaces/:wid/documents/:id/chunks");
+      expect(route).toBeDefined();
+
+      queryFn.mockResolvedValueOnce({ rows: [{ document_id: "doc-1" }], rowCount: 1 });
+      queryFn.mockResolvedValueOnce({
+        rows: [
+          { chunk_id: "c1", chunk_index: 0, content: "Chunk 1" },
+          { chunk_id: "c2", chunk_index: 1, content: "Chunk 2" },
+        ],
+        rowCount: 2,
+      });
+
+      const result = await route!.handler({ params: { wid: "ws-1", id: "doc-1" } }, createMockReply());
+
+      expect(result.chunks).toHaveLength(2);
+      expect(result.chunks[0].chunk_index).toBe(0);
+      expect(result.chunks[1].content).toBe("Chunk 2");
+    });
+
+    it("returns per-document nodes and edges from KG provenance", async () => {
+      const route = app.findRoute("GET", "/api/v1/workspaces/:wid/documents/:id/graph");
+      expect(route).toBeDefined();
+
+      queryFn.mockResolvedValueOnce({ rows: [{ document_id: "doc-1" }], rowCount: 1 });
+      queryFn.mockResolvedValueOnce({
+        rows: [{ node_id: "n1", name: "Ismail", node_type: "PERSON", mention_count: 2, chunk_ids: ["c1"] }],
+        rowCount: 1,
+      });
+      queryFn.mockResolvedValueOnce({
+        rows: [{ edge_id: "e1", edge_type: "shot", source_name: "Mujahid", target_name: "Ismail", evidence_count: 1, chunk_ids: ["c1"] }],
+        rowCount: 1,
+      });
+
+      const result = await route!.handler({ params: { wid: "ws-1", id: "doc-1" } }, createMockReply());
+
+      expect(result.nodes).toHaveLength(1);
+      expect(result.edges).toHaveLength(1);
+      expect(result.nodes[0].name).toBe("Ismail");
+      expect(result.edges[0].edge_type).toBe("shot");
     });
   });
 
@@ -222,20 +301,144 @@ describe("document-routes", () => {
 
       const request = {
         params: { wid: "ws-1" },
+        query: {},
         parts: () => parts,
         authUser: { user_id: "user-1" },
       };
 
       const reply = createMockReply();
-      const result = await uploadRoute!.handler(request, reply);
+      await uploadRoute!.handler(request, reply);
 
-      // send400 should have been called. The handler returns send400(reply, msg).
-      // We verify that the queryFn for document insert was NOT called
-      // (only the dedup check was called)
+      expect(reply.code).toHaveBeenCalledWith(409);
+
       const insertCalls = queryFn.mock.calls.filter(
         (call: unknown[]) => typeof call[0] === "string" && (call[0] as string).includes("INSERT INTO document")
       );
       expect(insertCalls).toHaveLength(0);
+    });
+
+    it("keeps blocking when an active duplicate exists alongside failed copies", async () => {
+      const uploadRoute = app.findRoute("POST", "/api/v1/workspaces/:wid/documents");
+
+      queryFn.mockResolvedValueOnce({
+        rows: [
+          { document_id: "active-doc-id", status: "ACTIVE" },
+          { document_id: "failed-doc-id", status: "FAILED" },
+        ],
+        rowCount: 2,
+      });
+
+      const fileBuffer = Buffer.from("duplicate file");
+      const parts = (async function* () {
+        yield { type: "file", filename: "dup.pdf", mimetype: "application/pdf", file: [fileBuffer] };
+      })();
+
+      const request = {
+        params: { wid: "ws-1" },
+        query: {},
+        parts: () => parts,
+        authUser: { userId: "user-1" },
+      };
+
+      const reply = createMockReply();
+      await uploadRoute!.handler(request, reply);
+
+      expect(reply.code).toHaveBeenCalledWith(409);
+      expect(storageProvider.upload).not.toHaveBeenCalled();
+    });
+
+    it("recovers failed duplicate uploads instead of rejecting them", async () => {
+      const uploadRoute = app.findRoute("POST", "/api/v1/workspaces/:wid/documents");
+      const client = {
+        query: vi.fn()
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({
+            rows: [{ document_id: "failed-doc-id", status: "UPLOADED" }],
+            rowCount: 1,
+          })
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({}),
+        release: vi.fn(),
+      };
+      getClient.mockResolvedValue(client);
+
+      queryFn.mockResolvedValueOnce({
+        rows: [{
+          document_id: "failed-doc-id",
+          status: "FAILED",
+          metadata: { existing: true },
+          custom_tags: ["kept"],
+          sensitivity_level: "INTERNAL",
+        }],
+        rowCount: 1,
+      });
+
+      const fileBuffer = Buffer.from("retryable file");
+      const parts = (async function* () {
+        yield { type: "file", filename: "retry.pdf", mimetype: "application/pdf", file: [fileBuffer] };
+      })();
+
+      const request = {
+        params: { wid: "ws-1" },
+        query: {},
+        parts: () => parts,
+        authUser: { userId: "user-1" },
+      };
+
+      const reply = createMockReply();
+      const result = await uploadRoute!.handler(request, reply);
+
+      expect(reply.code).toHaveBeenCalledWith(200);
+      expect(result.document_id).toBe("failed-doc-id");
+      expect(result.recovered_existing_document).toBe(true);
+      expect(storageProvider.upload).toHaveBeenCalledWith("ws-1", "failed-doc-id", "retry.pdf", fileBuffer);
+      expect(client.query).toHaveBeenCalledWith("BEGIN");
+      expect(client.query).toHaveBeenCalledWith("DELETE FROM citation WHERE document_id = $1", ["failed-doc-id"]);
+      expect(client.query).toHaveBeenCalledWith("DELETE FROM chunk WHERE document_id = $1", ["failed-doc-id"]);
+      expect(client.query).toHaveBeenCalledWith("DELETE FROM extraction_result WHERE document_id = $1", ["failed-doc-id"]);
+      expect(client.query).toHaveBeenCalledWith("COMMIT");
+      expect(client.release).toHaveBeenCalled();
+    });
+  });
+
+  describe("TC-FR001-03b: Reprocess failed document", () => {
+    it("clears derived state before requeueing validation", async () => {
+      const reprocessRoute = app.findRoute("POST", "/api/v1/workspaces/:wid/documents/:id/reprocess");
+      const client = {
+        query: vi.fn()
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({})
+          .mockResolvedValueOnce({}),
+        release: vi.fn(),
+      };
+      getClient.mockResolvedValue(client);
+
+      queryFn.mockResolvedValueOnce({
+        rows: [{ document_id: "doc-1", status: "FAILED" }],
+        rowCount: 1,
+      });
+
+      const request = { params: { wid: "ws-1", id: "doc-1" } };
+      const result = await reprocessRoute!.handler(request, createMockReply());
+
+      expect(result).toEqual({ document_id: "doc-1", status: "UPLOADED" });
+      expect(client.query).toHaveBeenCalledWith("BEGIN");
+      expect(client.query).toHaveBeenCalledWith("DELETE FROM citation WHERE document_id = $1", ["doc-1"]);
+      expect(client.query).toHaveBeenCalledWith("DELETE FROM chunk WHERE document_id = $1", ["doc-1"]);
+      expect(client.query).toHaveBeenCalledWith("DELETE FROM extraction_result WHERE document_id = $1", ["doc-1"]);
+      expect(client.query).toHaveBeenCalledWith("COMMIT");
+      expect(client.release).toHaveBeenCalled();
     });
   });
 
@@ -287,12 +490,18 @@ describe("document-routes", () => {
 
   describe("Route registration", () => {
     it("registers all expected routes", () => {
-      expect(app._routes).toHaveLength(5);
+      expect(app._routes).toHaveLength(12);
       expect(app.findRoute("GET", "/api/v1/workspaces/:wid/documents")).toBeDefined();
       expect(app.findRoute("GET", "/api/v1/workspaces/:wid/documents/:id")).toBeDefined();
+      expect(app.findRoute("GET", "/api/v1/workspaces/:wid/documents/:id/extracted-text")).toBeDefined();
+      expect(app.findRoute("GET", "/api/v1/workspaces/:wid/documents/:id/chunks")).toBeDefined();
+      expect(app.findRoute("GET", "/api/v1/workspaces/:wid/documents/:id/graph")).toBeDefined();
       expect(app.findRoute("POST", "/api/v1/workspaces/:wid/documents")).toBeDefined();
       expect(app.findRoute("GET", "/api/v1/workspaces/:wid/documents/:id/status")).toBeDefined();
+      expect(app.findRoute("POST", "/api/v1/workspaces/:wid/documents/:id/reprocess")).toBeDefined();
+      expect(app.findRoute("GET", "/api/v1/workspaces/:wid/documents/:id/download")).toBeDefined();
       expect(app.findRoute("DELETE", "/api/v1/workspaces/:wid/documents/:id")).toBeDefined();
+      expect(app.findRoute("PATCH", "/api/v1/workspaces/:wid/documents/:id")).toBeDefined();
     });
   });
 });

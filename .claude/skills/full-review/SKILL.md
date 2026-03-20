@@ -1,13 +1,13 @@
 ---
 name: full-review
-description: Run vibe-coding-guardrails, four domain review skills (UI, quality, security, infra), then sanity-check, then fix all issues found until every finding is resolved. Produces a consolidated report with an aggregate verdict.
+description: Run vibe-coding-guardrails, coding-standards-review, four domain review skills (UI, quality, security, infra), then sanity-check, then fix all issues found until every finding is resolved. Produces a consolidated report with an aggregate verdict.
 argument-hint: "[target] [options]"
 user_invocable: true
 ---
 
 # Full Review Playbook
 
-Run a comprehensive review cycle: fast guardrails pre-check, four domain reviews, cross-domain sanity-check, remediation, and re-verification.
+Run a comprehensive review cycle: fast guardrails pre-check, coding standards compliance scan, four domain reviews, cross-domain sanity-check, remediation, and re-verification.
 
 ## Scoping
 
@@ -35,6 +35,7 @@ Before launching reviews, inspect the target to determine which reviews apply:
 | Review | Skip Condition | Check Command |
 |--------|---------------|---------------|
 | Vibe-coding guardrails | No uncommitted changes in target | `git diff --name-only HEAD -- {target} \| head -1` |
+| Coding standards review | Never skip -- always applicable | -- |
 | UI review | No .tsx/.jsx files in target | `ls {target}/src/**/*.tsx 2>/dev/null \| head -1` |
 | Infra review | No Dockerfile and no CI config | `ls {target}/Dockerfile docker-compose*.yml .github/workflows/*.yml 2>/dev/null \| head -1` |
 | Quality review | Never skip -- always applicable | -- |
@@ -60,6 +61,7 @@ Each sub-review produces its own verdict. The full review aggregates them:
 | Sub-Review | Verdict Options |
 |---|---|
 | Guardrails | CLEAN / WARN / BLOCKED |
+| Coding Standards | COMPLIANT / NEEDS-WORK / NON-COMPLIANT |
 | UI | GO / NO-GO |
 | Quality | SOLID / NEEDS-WORK / AT-RISK |
 | Security | SECURE / AT-RISK / CRITICAL |
@@ -70,7 +72,7 @@ Final verdict rules:
 
 - **PASS**: All sub-verdicts are positive (CLEAN, GO, SOLID, SECURE, READY) OR have only non-blocking conditions.
 - **CONDITIONAL**: Any sub-verdict has conditions but no blockers (e.g., Guardrails is WARN, Quality is NEEDS-WORK, Infra is CONDITIONAL, Sanity is CONDITIONAL).
-- **FAIL**: Any sub-verdict is BLOCKED (guardrails), NO-GO, AT-RISK (quality or security), CRITICAL, NOT-READY, or BLOCKED (sanity).
+- **FAIL**: Any sub-verdict is BLOCKED (guardrails), NON-COMPLIANT (coding standards), NO-GO, AT-RISK (quality or security), CRITICAL, NOT-READY, or BLOCKED (sanity).
 
 ## Conflict Resolution Priority
 
@@ -104,9 +106,19 @@ Run `/vibe-coding-guardrails {target}` first. This is a fast (< 60 seconds) patt
 
 Guardrails findings use the same P0-P3 severity scale and are included in the consolidated finding table alongside domain review findings. Apply the same severity mapping (P0→CRITICAL, P1→HIGH, etc.) and deduplication rules -- if a guardrails finding overlaps with a domain review finding at the same `file:line`, merge them and tag as `[Guardrails + {Domain}]`.
 
-## Phase 2: Domain Reviews
+## Phase 2: Coding Standards Compliance
 
-Execute each sub-review by invoking the corresponding skill (`/ui-review {target}`, `/quality-review {target}`, etc.). Run them sequentially -- each review must complete before starting the next. Collect all output reports before proceeding to Phase 3.
+Run `/coding-standards-review {target}` to scan against the project's 107-check coding standards matrix. This covers cross-cutting concerns (type safety, SQL patterns, accessibility patterns, dark mode, data tables, forms, etc.) that individual domain reviews may not check systematically.
+
+- If coding standards returns **NON-COMPLIANT** (any P0 or 5+ P1 violations), fix all P0s and critical P1s immediately before proceeding to domain reviews. This prevents domain reviews from re-flagging the same issues.
+- If coding standards returns **NEEDS-WORK** (< 5 P1, no P0), note findings and continue -- they will be fixed during Phase 5 remediation.
+- If coding standards returns **COMPLIANT**, proceed directly.
+
+Coding standards findings use the same P0-P3 severity scale and are included in the consolidated finding table. Apply the same deduplication rules -- if a coding standards finding overlaps with a domain review finding at the same `file:line`, merge them and tag as `[Standards + {Domain}]`.
+
+## Phase 3: Domain Reviews
+
+Execute each sub-review by invoking the corresponding skill (`/ui-review {target}`, `/quality-review {target}`, etc.). Run them sequentially -- each review must complete before starting the next. Collect all output reports before proceeding to Phase 4.
 
 1. `/ui-review {target}` (skip if target has no `.tsx` files -- see Conditional Skip Logic)
 2. `/quality-review {target}`
@@ -115,14 +127,14 @@ Execute each sub-review by invoking the corresponding skill (`/ui-review {target
 
 After all reviews complete, collect findings from each report. Apply the severity mapping to normalize P0/P1/P2/P3 labels to CRITICAL/HIGH/MEDIUM/LOW.
 
-## Phase 3: Sanity Check
+## Phase 4: Sanity Check
 
 Run `/sanity-check {target}` to cross-validate findings across all domains and check for:
 - Regressions or conflicts between recommendations.
 - Build and test health before remediation begins.
 - Merge conflicts from overlapping fixes.
 
-## Phase 4: Remediation (skip if `no-fix`)
+## Phase 5: Remediation (skip if `no-fix`)
 
 Work through findings by severity: CRITICAL first, then HIGH, then MEDIUM, then LOW -- stopping at the user's chosen floor (default: HIGH and above).
 
@@ -166,7 +178,7 @@ Fix both: add aria-label with i18n key:
 <button onClick={handleDelete} aria-label={t("common.delete")}>{t("common.delete_icon")}</button>
 ```
 
-## Phase 5: Re-verification
+## Phase 6: Re-verification
 
 Run `/sanity-check {target}` again after all fixes to confirm:
 - All targeted findings are resolved.
@@ -241,6 +253,10 @@ Guardrails Pre-Check:
   Findings:           N P0, M P1, X P2, Y P3
   Verdict:            [CLEAN | WARN | BLOCKED | SKIPPED]
 
+Coding Standards Review:
+  Checks:             X/107 PASS, Y VIOLATION, Z N/A
+  Verdict:            [COMPLIANT | NEEDS-WORK | NON-COMPLIANT]
+
 UI Review:
   Blocking Gates:     X/11 PASS, Y/11 PARTIAL, Z/11 FAIL
   Verdict:            [GO | NO-GO | SKIPPED]
@@ -275,8 +291,8 @@ Final Verdict:        [PASS | CONDITIONAL | FAIL]
 The final report must contain these sections in order:
 
 1. **Scope and Options** -- target, selected severity floor, skip decisions
-2. **Sub-Review Summaries** -- one paragraph per domain with verdict and top findings
-3. **Severity-Mapped Finding Table** -- all findings normalized to CRITICAL/HIGH/MEDIUM/LOW, deduplicated, with source domain tags
+2. **Sub-Review Summaries** -- one paragraph per review (guardrails, coding standards, UI, quality, security, infra, sanity) with verdict and top findings
+3. **Severity-Mapped Finding Table** -- all findings normalized to CRITICAL/HIGH/MEDIUM/LOW, deduplicated, with source domain tags (including `[Standards]` for coding-standards-review findings)
 4. **Conflict Log** -- any contradictory recommendations and their resolution
 5. **Remediation Log** -- each fix applied, files changed, verification result
 6. **Aggregate Gate Scorecard** -- combined gates from all domains

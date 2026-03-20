@@ -123,7 +123,7 @@ export function createOidcRoutes(deps: OidcRouteDeps) {
 
       auth.setAuthCookie(reply, localToken);
 
-      return { user: payload, token: localToken };
+      return { user: payload };
     });
   };
 }

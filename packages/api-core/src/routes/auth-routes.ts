@@ -40,7 +40,7 @@ export function createAuthRoutes(deps: AuthRouteDeps) {
           `SELECT r.role_key FROM user_role ur JOIN role r ON r.role_id = ur.role_id WHERE ur.user_id = $1`,
           [dbUser.user_id]
         );
-        const roles = rolesResult.rows.map((r: any) => r.role_key);
+        const roles = rolesResult.rows.map((r: { role_key: string }) => r.role_key);
         const token = auth.generateToken({ user_id: dbUser.user_id, user_type: dbUser.user_type, roles, unit_id: dbUser.unit_id });
         auth.setAuthCookie(reply, token);
         return { user: { userId: dbUser.user_id, userType: dbUser.user_type, roles, unitId: dbUser.unit_id, displayName: result.displayName, email: result.email } };
@@ -67,7 +67,7 @@ export function createAuthRoutes(deps: AuthRouteDeps) {
       }
       const token = auth.generateToken({ user_id: result.user.user_id, user_type: result.user.user_type, roles: result.user.roles, unit_id: result.user.unit_id });
       auth.setAuthCookie(reply, token);
-      return { user: result.user, token };
+      return { user: result.user };
     });
 
     app.post("/api/v1/auth/logout", {
@@ -76,7 +76,7 @@ export function createAuthRoutes(deps: AuthRouteDeps) {
       const authUser = request.authUser;
       const authToken = request.authToken;
       if (authUser && authToken) {
-        const decoded = jwt.decode(authToken) as any;
+        const decoded = jwt.decode(authToken) as { exp?: number } | null;
         if (decoded?.exp) {
           await auth.revokeToken(authUser.jti, authUser.userId, new Date(decoded.exp * 1000));
         }

@@ -57,7 +57,7 @@ export function createAdminRoutes(deps: AdminRouteDeps) {
         reply.code(201);
         return { user };
       } catch (err: unknown) {
-        const pgCode = err instanceof Error && "code" in err ? (err as any).code : undefined;
+        const pgCode = typeof err === "object" && err && "code" in err ? String((err as { code?: unknown }).code) : undefined;
         if (pgCode === "23505") {
           return send400(reply, "USERNAME_EXISTS", "Username already taken");
         }

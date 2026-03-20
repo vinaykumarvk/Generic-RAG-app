@@ -98,7 +98,7 @@ export function createUserRoutes(app: FastifyInstance, deps: UserRouteDeps) {
     let idx = 1;
 
     if (full_name !== undefined) { fields.push(`full_name = $${idx++}`); values.push(full_name); }
-    if (email !== undefined) { fields.push(`email = $${idx++}`); values.push(email); }
+    // Email updates removed for security (FR-022/AC-03)
     if (status !== undefined && isAdmin) { fields.push(`status = $${idx++}`); values.push(status); }
     if (user_type !== undefined && isAdmin) { fields.push(`user_type = $${idx++}`); values.push(user_type); }
 
@@ -114,6 +114,39 @@ export function createUserRoutes(app: FastifyInstance, deps: UserRouteDeps) {
     );
     if (result.rows.length === 0) return send404(reply, "User not found");
     return result.rows[0];
+  });
+
+  // Soft-delete user (admin only) — FR-022/AC-05
+  app.delete<{ Params: { id: string } }>("/api/v1/users/:id", async (request, reply) => {
+    if (request.authUser?.userType !== "ADMIN") {
+      reply.code(403);
+      return { error: "FORBIDDEN", message: "Admin access required" };
+    }
+    const { id } = request.params;
+
+    // Cannot delete yourself
+    if (request.authUser?.userId === id) {
+      return send400(reply, "Cannot archive your own account");
+    }
+
+    // FR-022/AC-05: Reassign resources before archiving
+    await queryFn(
+      "UPDATE document SET uploaded_by = 'system' WHERE uploaded_by = $1",
+      [id]
+    );
+
+    // FR-022/AC-04: Archive user and revoke all tokens in one atomic update
+    const result = await queryFn(
+      `UPDATE user_account
+       SET tokens_revoked_before = now(), status = 'ARCHIVED', archived_at = now(), archived_by = $1, updated_at = now()
+       WHERE user_id = $2 AND status != 'ARCHIVED'
+       RETURNING user_id, username, status`,
+      [request.authUser?.userId, id]
+    );
+
+    if (result.rows.length === 0) return send404(reply, "User not found or already archived");
+
+    return { archived: true, user_id: id };
   });
 
   // Get current user profile

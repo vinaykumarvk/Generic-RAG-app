@@ -1,34 +1,47 @@
-import { Zap, Scale, BookOpen } from "lucide-react";
-
-const PRESETS = [
-  { value: "concise" as const, label: "Concise", icon: Zap, description: "Fast, brief answers" },
-  { value: "balanced" as const, label: "Balanced", icon: Scale, description: "Default depth" },
-  { value: "detailed" as const, label: "Detailed", icon: BookOpen, description: "Deep analysis" },
-];
+import { Zap, BookOpen } from "lucide-react";
 
 interface PresetSelectorProps {
   value: "concise" | "balanced" | "detailed";
   onChange: (preset: "concise" | "balanced" | "detailed") => void;
 }
 
+/**
+ * FR-019/AC-01: Simplified 2-way Brief|Detailed toggle.
+ * Maps Brief → "concise" preset, Detailed → "detailed" preset.
+ */
 export function PresetSelector({ value, onChange }: PresetSelectorProps) {
+  const isBrief = value === "concise";
+
   return (
-    <div className="flex gap-1">
-      {PRESETS.map(({ value: v, label, icon: Icon, description }) => (
-        <button
-          key={v}
-          onClick={() => onChange(v)}
-          title={description}
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-            value === v
-              ? "bg-primary-100 text-primary-700"
-              : "text-gray-500 hover:bg-gray-100"
-          }`}
-        >
-          <Icon size={12} />
-          {label}
-        </button>
-      ))}
+    <div className="flex items-center" role="radiogroup" aria-label="Answer detail level">
+      <button
+        type="button"
+        role="radio"
+        aria-checked={isBrief}
+        onClick={() => onChange("concise")}
+        className={`flex items-center gap-1.5 px-3 py-1 rounded-l-md text-xs font-medium transition-colors border ${
+          isBrief
+            ? "bg-primary-100 text-primary-700 border-primary-300"
+            : "text-skin-muted hover:bg-surface-alt border-skin"
+        }`}
+      >
+        <Zap size={12} aria-hidden="true" />
+        Brief
+      </button>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={!isBrief}
+        onClick={() => onChange("detailed")}
+        className={`flex items-center gap-1.5 px-3 py-1 rounded-r-md text-xs font-medium transition-colors border border-l-0 ${
+          !isBrief
+            ? "bg-primary-100 text-primary-700 border-primary-300"
+            : "text-skin-muted hover:bg-surface-alt border-skin"
+        }`}
+      >
+        <BookOpen size={12} aria-hidden="true" />
+        Detailed
+      </button>
     </div>
   );
 }

@@ -33,44 +33,44 @@ export function NodeDetailPanel({ workspaceId, nodeId, onClose }: NodeDetailPane
   });
 
   return (
-    <div className="w-80 bg-white border border-gray-200 rounded-xl overflow-hidden flex flex-col">
-      <div className="flex items-center justify-between p-4 border-b border-gray-100">
-        <h3 className="font-semibold text-sm">Node Details</h3>
-        <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+    <div className="w-80 bg-surface border border-skin rounded-xl overflow-hidden flex flex-col">
+      <div className="flex items-center justify-between p-4 border-b border-skin">
+        <h3 className="font-semibold text-sm text-skin-base">Node Details</h3>
+        <button type="button" onClick={onClose} className="text-skin-muted hover:text-skin-base" aria-label="Close panel"><X size={16} aria-hidden="true" /></button>
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center py-8"><Loader2 className="animate-spin text-gray-400" /></div>
+        <div className="flex justify-center py-8"><Loader2 className="animate-spin text-skin-muted" aria-hidden="true" /></div>
       ) : node ? (
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div>
-            <h4 className="font-bold text-lg">{node.name}</h4>
-            <span className="inline-block mt-1 text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-medium">
+            <h4 className="font-bold text-lg text-skin-base">{node.name}</h4>
+            <span className="inline-block mt-1 text-xs bg-surface-alt text-skin-muted px-2 py-0.5 rounded font-medium">
               {node.node_type}
             </span>
-            <span className="text-xs text-gray-400 ml-2">{node.source_count} sources</span>
+            <span className="text-xs text-skin-muted ml-2">{node.source_count} sources</span>
           </div>
 
           {node.description && (
-            <p className="text-sm text-gray-600">{node.description}</p>
+            <p className="text-sm text-skin-muted">{node.description}</p>
           )}
 
           <div>
-            <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+            <h5 className="text-xs font-semibold text-skin-muted uppercase tracking-wider mb-2">
               Relationships ({node.edges?.length || 0})
             </h5>
             <div className="space-y-2">
               {node.edges?.map((edge) => (
-                <div key={edge.edge_id} className="text-xs p-2 bg-gray-50 rounded">
+                <div key={edge.edge_id} className="text-xs p-2 bg-surface-alt rounded">
                   <div className="flex items-center gap-1">
-                    <span className="font-medium">{edge.source_name}</span>
-                    <ArrowRight size={10} className="text-gray-400" />
-                    <span className="font-medium">{edge.target_name}</span>
+                    <span className="font-medium text-skin-base">{edge.source_name}</span>
+                    <ArrowRight size={10} className="text-skin-muted" aria-hidden="true" />
+                    <span className="font-medium text-skin-base">{edge.target_name}</span>
                   </div>
-                  <span className="text-gray-500">{edge.edge_type}</span>
+                  <span className="text-skin-muted">{edge.edge_type}</span>
                   {edge.document_title && (
-                    <div className="flex items-center gap-1 mt-1 text-gray-400">
-                      <FileText size={10} />
+                    <div className="flex items-center gap-1 mt-1 text-skin-muted">
+                      <FileText size={10} aria-hidden="true" />
                       <span className="truncate">{edge.document_title}</span>
                     </div>
                   )}

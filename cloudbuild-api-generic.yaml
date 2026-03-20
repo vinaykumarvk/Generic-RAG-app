@@ -1,0 +1,16 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - ${_DOCKERFILE}
+      - -t
+      - ${_IMAGE}
+      - .
+images:
+  - ${_IMAGE}
+substitutions:
+  _DOCKERFILE: Dockerfile.api
+  _IMAGE: asia-southeast1-docker.pkg.dev/$PROJECT_ID/policing-apps/police-cases-kb-api:latest
+options:
+  logging: CLOUD_LOGGING_ONLY

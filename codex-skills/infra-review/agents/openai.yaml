@@ -1,0 +1,4 @@
+interface:
+  display_name: "Infrastructure Review"
+  short_description: "Review architecture, reliability, and deploy readiness"
+  default_prompt: "Use $infra-review to assess architecture, reliability, observability, and deployment readiness."

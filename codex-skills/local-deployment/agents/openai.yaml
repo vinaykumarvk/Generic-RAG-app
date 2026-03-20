@@ -1,0 +1,4 @@
+interface:
+  display_name: "Local Deployment"
+  short_description: "Verify local app readiness end-to-end"
+  default_prompt: "Use $local-deployment to verify a target app works locally, including auth, routes, and the requested feature flow."

@@ -13,6 +13,9 @@ export interface VectorSearchResult {
   page_start: number | null;
   heading_path: string | null;
   document_title: string;
+  case_reference?: string | null;
+  fir_number?: string | null;
+  station_code?: string | null;
 }
 
 export interface VectorSearchDeps {
@@ -25,7 +28,7 @@ export async function vectorSearch(
   workspaceId: string,
   query: string,
   maxResults: number,
-  filters?: { documentIds?: string[]; categories?: string[] },
+  filters?: { documentIds?: string[]; categories?: string[]; case_reference?: string },
 ): Promise<{ results: VectorSearchResult[]; latencyMs: number }> {
   const start = Date.now();
 
@@ -54,6 +57,9 @@ export async function vectorSearch(
   const result = await deps.queryFn(
     `SELECT c.chunk_id, c.document_id, c.content, c.chunk_type, c.page_start, c.heading_path,
             d.title as document_title,
+            d.case_reference,
+            d.fir_number,
+            d.station_code,
             1 - (c.embedding <=> $1::vector) as similarity
      FROM chunk c
      JOIN document d ON d.document_id = c.document_id

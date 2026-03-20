@@ -20,17 +20,37 @@ export const DocumentTaxonomySchema = z.object({
 });
 export type DocumentTaxonomy = z.infer<typeof DocumentTaxonomySchema>;
 
+export const KgNodeTypeDefSchema = z.object({
+  type: z.string(),
+  label: z.string(),
+  color: z.string().optional(),
+  subtypes: z.array(z.string()).optional(),
+  attributeSchema: z.record(z.string(), z.object({
+    type: z.string(),
+    required: z.boolean().optional(),
+    controlled: z.array(z.string()).optional(),
+  })).optional(),
+});
+export type KgNodeTypeDef = z.infer<typeof KgNodeTypeDefSchema>;
+
+export const KgEdgeTypeDefSchema = z.object({
+  type: z.string(),
+  label: z.string(),
+  directed: z.boolean().default(true),
+  sourceTypes: z.array(z.string()).optional(),
+  targetTypes: z.array(z.string()).optional(),
+});
+export type KgEdgeTypeDef = z.infer<typeof KgEdgeTypeDefSchema>;
+
 export const KgOntologySchema = z.object({
-  nodeTypes: z.array(z.object({
-    type: z.string(),
-    label: z.string(),
-    color: z.string().optional(),
-  })),
-  edgeTypes: z.array(z.object({
-    type: z.string(),
-    label: z.string(),
-    directed: z.boolean().default(true),
-  })),
+  nodeTypes: z.array(KgNodeTypeDefSchema),
+  edgeTypes: z.array(KgEdgeTypeDefSchema),
+  assertionTypes: z.array(z.string()).optional(),
+  extractionTemplates: z.record(z.string(), z.object({
+    prompt: z.string(),
+    examples: z.array(z.string()).optional(),
+  })).optional(),
+  controlledVocabularies: z.record(z.string(), z.array(z.string())).optional(),
 });
 export type KgOntology = z.infer<typeof KgOntologySchema>;
 

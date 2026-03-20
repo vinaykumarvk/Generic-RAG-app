@@ -16,6 +16,8 @@ export type JobStatus = z.infer<typeof JobStatusSchema>;
 export const JobStepSchema = z.enum([
   "VALIDATE",
   "NORMALIZE",
+  "CONVERT",
+  "METADATA_EXTRACT",
   "CHUNK",
   "EMBED",
   "KG_EXTRACT",

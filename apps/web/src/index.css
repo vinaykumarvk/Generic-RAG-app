@@ -2,8 +2,1115 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ═══════════════════════════════════════════════════════════
+   Design System — CSS Custom Properties
+   Themes applied via [data-theme="..."] on <html>.
+   Tailwind primary-* colors use space-separated RGB.
+   Brand tokens use hex for color-mix() / gradient support.
+   ═══════════════════════════════════════════════════════════ */
+
 @layer base {
+  /* ── Default (Blue) ── */
+  :root {
+    color-scheme: light;
+
+    --color-primary-50:  239 246 255;
+    --color-primary-100: 219 234 254;
+    --color-primary-200: 191 219 254;
+    --color-primary-300: 147 197 253;
+    --color-primary-400: 96  165 250;
+    --color-primary-500: 59  130 246;
+    --color-primary-600: 37  99  235;
+    --color-primary-700: 29  78  216;
+    --color-primary-800: 30  64  175;
+    --color-primary-900: 30  58  138;
+
+    --color-surface: 255 255 255;
+    --color-surface-alt: 249 250 251;
+    --color-bg: 249 250 251;
+    --color-text: 17 24 39;
+    --color-text-secondary: 107 114 128;
+    --color-border: 229 231 235;
+
+    --color-sidebar-bg: 241 245 249;
+    --color-sidebar-text: 17 24 39;
+    --color-sidebar-border: 226 232 240;
+    --color-sidebar-hover: 226 232 240;
+    --color-sidebar-active-bg: 30 64 175;
+    --color-sidebar-active-text: 255 255 255;
+    --color-sidebar-muted: 107 114 128;
+
+    /* Knowledge graph node colors */
+    --color-graph-person: 59 130 246;
+    --color-graph-org: 245 158 11;
+    --color-graph-concept: 16 185 129;
+    --color-graph-location: 139 92 246;
+    --color-graph-tech: 239 68 68;
+    --color-graph-event: 6 182 212;
+    --color-graph-doc: 107 114 128;
+    --color-graph-case: 249 115 22;
+    --color-graph-object: 132 204 22;
+    --color-graph-legal: 168 85 247;
+    --color-graph-assertion: 236 72 153;
+    --color-graph-default: 156 163 175;
+
+    /* Brand accent (ADS red) */
+    --color-brand-accent: 226 42 42;
+    /* Logo "ADS" text: red on light, white on dark */
+    --color-logo-accent: #e22a2a;
+    --color-danger: 220 38 38;
+    --color-danger-soft: 254 242 242;
+    --color-danger-border: 254 202 202;
+    --color-success: 22 163 74;
+    --color-success-soft: 240 253 244;
+    --color-success-border: 187 247 208;
+    --color-warning: 217 119 6;
+    --color-warning-soft: 255 251 235;
+    --color-warning-border: 253 230 138;
+
+    /* Semantic brand tokens (hex for color-mix / gradient) */
+    --color-brand: #1e40af;
+    --color-brand-hover: #1e3a8a;
+    --color-brand-soft: #eff6ff;
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── Teal ── */
+  [data-theme="teal"] {
+    --color-primary-50:  240 253 250;
+    --color-primary-100: 204 251 241;
+    --color-primary-200: 153 246 228;
+    --color-primary-300: 94  234 212;
+    --color-primary-400: 45  212 191;
+    --color-primary-500: 20  184 166;
+    --color-primary-600: 13  148 136;
+    --color-primary-700: 15  118 110;
+    --color-primary-800: 17  94  89;
+    --color-primary-900: 19  78  74;
+
+    --color-sidebar-active-bg: 17 94 89;
+    --color-brand: #115e59;
+    --color-brand-hover: #134e4a;
+    --color-brand-soft: #f0fdfa;
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── Indigo ── */
+  [data-theme="indigo"] {
+    --color-primary-50:  238 242 255;
+    --color-primary-100: 224 231 255;
+    --color-primary-200: 199 210 254;
+    --color-primary-300: 165 180 252;
+    --color-primary-400: 129 140 248;
+    --color-primary-500: 99  102 241;
+    --color-primary-600: 79  70  229;
+    --color-primary-700: 67  56  202;
+    --color-primary-800: 55  48  163;
+    --color-primary-900: 49  46  129;
+
+    --color-sidebar-active-bg: 55 48 163;
+    --color-brand: #3730a3;
+    --color-brand-hover: #312e81;
+    --color-brand-soft: #eef2ff;
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── Emerald ── */
+  [data-theme="emerald"] {
+    --color-primary-50:  236 253 245;
+    --color-primary-100: 209 250 229;
+    --color-primary-200: 167 243 208;
+    --color-primary-300: 110 231 183;
+    --color-primary-400: 52  211 153;
+    --color-primary-500: 16  185 129;
+    --color-primary-600: 5   150 105;
+    --color-primary-700: 4   120 87;
+    --color-primary-800: 6   95  70;
+    --color-primary-900: 6   78  59;
+
+    --color-sidebar-active-bg: 6 95 70;
+    --color-brand: #065f46;
+    --color-brand-hover: #064e3b;
+    --color-brand-soft: #ecfdf5;
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── Amber ── */
+  [data-theme="amber"] {
+    --color-primary-50:  255 251 235;
+    --color-primary-100: 254 243 199;
+    --color-primary-200: 253 230 138;
+    --color-primary-300: 252 211 77;
+    --color-primary-400: 251 191 36;
+    --color-primary-500: 245 158 11;
+    --color-primary-600: 217 119 6;
+    --color-primary-700: 180 83  9;
+    --color-primary-800: 146 64  14;
+    --color-primary-900: 120 53  15;
+
+    --color-sidebar-active-bg: 146 64 14;
+    --color-brand: #92400e;
+    --color-brand-hover: #78350f;
+    --color-brand-soft: #fffbeb;
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── Rose ── */
+  [data-theme="rose"] {
+    --color-primary-50:  255 241 242;
+    --color-primary-100: 255 228 230;
+    --color-primary-200: 254 205 211;
+    --color-primary-300: 253 164 175;
+    --color-primary-400: 251 113 133;
+    --color-primary-500: 244 63  94;
+    --color-primary-600: 225 29  72;
+    --color-primary-700: 190 18  60;
+    --color-primary-800: 159 18  57;
+    --color-primary-900: 136 19  55;
+
+    --color-sidebar-active-bg: 159 18 57;
+    --color-brand: #9f1239;
+    --color-brand-hover: #881337;
+    --color-brand-soft: #fff1f2;
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── Violet ── */
+  [data-theme="violet"] {
+    --color-primary-50:  245 243 255;
+    --color-primary-100: 237 233 254;
+    --color-primary-200: 221 214 254;
+    --color-primary-300: 196 181 253;
+    --color-primary-400: 167 139 250;
+    --color-primary-500: 139 92  246;
+    --color-primary-600: 124 58  237;
+    --color-primary-700: 109 40  217;
+    --color-primary-800: 91  33  182;
+    --color-primary-900: 76  29  149;
+
+    --color-sidebar-active-bg: 91 33 182;
+    --color-brand: #5b21b6;
+    --color-brand-hover: #4c1d95;
+    --color-brand-soft: #f5f3ff;
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── Cyan ── */
+  [data-theme="cyan"] {
+    --color-primary-50:  236 254 255;
+    --color-primary-100: 207 250 254;
+    --color-primary-200: 165 243 252;
+    --color-primary-300: 103 232 249;
+    --color-primary-400: 34  211 238;
+    --color-primary-500: 6   182 212;
+    --color-primary-600: 8   145 178;
+    --color-primary-700: 14  116 144;
+    --color-primary-800: 21  94  117;
+    --color-primary-900: 22  78  99;
+
+    --color-sidebar-active-bg: 21 94 117;
+    --color-brand: #155e75;
+    --color-brand-hover: #164e63;
+    --color-brand-soft: #ecfeff;
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── Slate ── */
+  [data-theme="slate"] {
+    --color-primary-50:  248 250 252;
+    --color-primary-100: 241 245 249;
+    --color-primary-200: 226 232 240;
+    --color-primary-300: 203 213 225;
+    --color-primary-400: 148 163 184;
+    --color-primary-500: 100 116 139;
+    --color-primary-600: 71  85  105;
+    --color-primary-700: 51  65  85;
+    --color-primary-800: 30  41  59;
+    --color-primary-900: 15  23  42;
+
+    --color-sidebar-active-bg: 30 41 59;
+    --color-brand: #1e293b;
+    --color-brand-hover: #0f172a;
+    --color-brand-soft: #f8fafc;
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── Orange ── */
+  [data-theme="orange"] {
+    --color-primary-50:  255 247 237;
+    --color-primary-100: 255 237 213;
+    --color-primary-200: 254 215 170;
+    --color-primary-300: 253 186 116;
+    --color-primary-400: 251 146 60;
+    --color-primary-500: 249 115 22;
+    --color-primary-600: 234 88  12;
+    --color-primary-700: 194 65  12;
+    --color-primary-800: 154 52  18;
+    --color-primary-900: 124 45  18;
+
+    --color-sidebar-active-bg: 154 52 18;
+    --color-brand: #9a3412;
+    --color-brand-hover: #7c2d12;
+    --color-brand-soft: #fff7ed;
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ═══ Dark Mode Themes ═══ */
+
+  /* ── Tokyo Night ── Storm variant */
+  [data-theme="tokyo-night"] {
+    color-scheme: dark;
+    --color-logo-accent: #ffffff;
+
+    --color-primary-50:  224 232 255;
+    --color-primary-100: 199 214 255;
+    --color-primary-200: 169 192 255;
+    --color-primary-300: 141 172 255;
+    --color-primary-400: 122 162 247;
+    --color-primary-500: 100 140 230;
+    --color-primary-600: 80  118 210;
+    --color-primary-700: 65  100 185;
+    --color-primary-800: 52  82  156;
+    --color-primary-900: 40  64  125;
+
+    --color-surface: 36 40 59;
+    --color-surface-alt: 26 27 38;
+    --color-bg: 26 27 38;
+    --color-text: 192 202 245;
+    --color-text-secondary: 86 95 137;
+    --color-border: 59 66 97;
+
+    --color-sidebar-bg: 22 22 30;
+    --color-sidebar-text: 192 202 245;
+    --color-sidebar-border: 36 40 59;
+    --color-sidebar-hover: 26 27 38;
+    --color-sidebar-active-bg: 122 162 247;
+    --color-sidebar-active-text: 192 202 245;
+    --color-sidebar-muted: 86 95 137;
+
+    --color-brand: #7aa2f7;
+    --color-brand-hover: #91b4fa;
+    --color-brand-soft: rgba(122, 162, 247, 0.16);
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── Dracula ── */
+  [data-theme="dracula"] {
+    color-scheme: dark;
+    --color-logo-accent: #ffffff;
+
+    --color-primary-50:  240 234 255;
+    --color-primary-100: 225 213 255;
+    --color-primary-200: 210 193 254;
+    --color-primary-300: 199 178 253;
+    --color-primary-400: 189 147 249;
+    --color-primary-500: 170 120 240;
+    --color-primary-600: 148 100 220;
+    --color-primary-700: 125 80  195;
+    --color-primary-800: 100 65  165;
+    --color-primary-900: 80  50  135;
+
+    --color-surface: 68 71 90;
+    --color-surface-alt: 40 42 54;
+    --color-bg: 40 42 54;
+    --color-text: 248 248 242;
+    --color-text-secondary: 98 114 164;
+    --color-border: 68 71 90;
+
+    --color-sidebar-bg: 33 34 44;
+    --color-sidebar-text: 248 248 242;
+    --color-sidebar-border: 68 71 90;
+    --color-sidebar-hover: 40 42 54;
+    --color-sidebar-active-bg: 189 147 249;
+    --color-sidebar-active-text: 248 248 242;
+    --color-sidebar-muted: 98 114 164;
+
+    --color-brand: #bd93f9;
+    --color-brand-hover: #caa8fc;
+    --color-brand-soft: rgba(189, 147, 249, 0.18);
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── Nord ── Polar Night + Frost */
+  [data-theme="nord"] {
+    color-scheme: dark;
+    --color-logo-accent: #ffffff;
+
+    --color-primary-50:  224 243 250;
+    --color-primary-100: 199 232 245;
+    --color-primary-200: 172 220 240;
+    --color-primary-300: 148 210 236;
+    --color-primary-400: 136 192 208;
+    --color-primary-500: 115 170 190;
+    --color-primary-600: 94  139 159;
+    --color-primary-700: 76  112 132;
+    --color-primary-800: 59  86  105;
+    --color-primary-900: 46  67  82;
+
+    --color-surface: 59 66 82;
+    --color-surface-alt: 46 52 64;
+    --color-bg: 46 52 64;
+    --color-text: 236 239 244;
+    --color-text-secondary: 165 173 186;
+    --color-border: 67 76 94;
+
+    --color-sidebar-bg: 41 46 56;
+    --color-sidebar-text: 236 239 244;
+    --color-sidebar-border: 59 66 82;
+    --color-sidebar-hover: 46 52 64;
+    --color-sidebar-active-bg: 136 192 208;
+    --color-sidebar-active-text: 236 239 244;
+    --color-sidebar-muted: 127 132 142;
+
+    --color-brand: #88c0d0;
+    --color-brand-hover: #8fbcbb;
+    --color-brand-soft: rgba(136, 192, 208, 0.18);
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── Catppuccin Mocha ── */
+  [data-theme="catppuccin"] {
+    color-scheme: dark;
+    --color-logo-accent: #ffffff;
+
+    --color-primary-50:  240 230 255;
+    --color-primary-100: 228 214 255;
+    --color-primary-200: 215 195 252;
+    --color-primary-300: 203 166 247;
+    --color-primary-400: 180 140 230;
+    --color-primary-500: 155 115 210;
+    --color-primary-600: 130 95  185;
+    --color-primary-700: 110 78  160;
+    --color-primary-800: 88  62  132;
+    --color-primary-900: 70  48  108;
+
+    --color-surface: 49 50 68;
+    --color-surface-alt: 30 30 46;
+    --color-bg: 30 30 46;
+    --color-text: 205 214 244;
+    --color-text-secondary: 147 153 178;
+    --color-border: 69 71 90;
+
+    --color-sidebar-bg: 24 24 37;
+    --color-sidebar-text: 205 214 244;
+    --color-sidebar-border: 49 50 68;
+    --color-sidebar-hover: 30 30 46;
+    --color-sidebar-active-bg: 203 166 247;
+    --color-sidebar-active-text: 30 30 46;
+    --color-sidebar-muted: 127 132 156;
+
+    --color-brand: #cba6f7;
+    --color-brand-hover: #d6b8fa;
+    --color-brand-soft: rgba(203, 166, 247, 0.16);
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── Solarized Dark ── */
+  [data-theme="solarized-dark"] {
+    color-scheme: dark;
+    --color-logo-accent: #ffffff;
+
+    --color-primary-50:  218 238 252;
+    --color-primary-100: 190 222 248;
+    --color-primary-200: 155 202 242;
+    --color-primary-300: 115 178 232;
+    --color-primary-400: 38  139 210;
+    --color-primary-500: 30  120 185;
+    --color-primary-600: 24  100 160;
+    --color-primary-700: 20  82  135;
+    --color-primary-800: 16  65  110;
+    --color-primary-900: 12  50  88;
+
+    --color-surface: 7 54 66;
+    --color-surface-alt: 0 43 54;
+    --color-bg: 0 43 54;
+    --color-text: 253 246 227;
+    --color-text-secondary: 131 148 150;
+    --color-border: 88 110 117;
+
+    --color-sidebar-bg: 0 34 43;
+    --color-sidebar-text: 238 232 213;
+    --color-sidebar-border: 7 54 66;
+    --color-sidebar-hover: 0 43 54;
+    --color-sidebar-active-bg: 38 139 210;
+    --color-sidebar-active-text: 253 246 227;
+    --color-sidebar-muted: 101 123 131;
+
+    --color-brand: #268bd2;
+    --color-brand-hover: #2e9fe0;
+    --color-brand-soft: rgba(38, 139, 210, 0.16);
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── High Contrast ── */
+  [data-theme="high-contrast"] {
+    --color-primary-50:  219 234 254;
+    --color-primary-100: 191 219 254;
+    --color-primary-200: 147 197 253;
+    --color-primary-300: 96  165 250;
+    --color-primary-400: 59  130 246;
+    --color-primary-500: 37  99  235;
+    --color-primary-600: 29  78  216;
+    --color-primary-700: 30  64  175;
+    --color-primary-800: 30  58  138;
+    --color-primary-900: 23  37  84;
+
+    --color-surface: 255 255 255;
+    --color-surface-alt: 241 245 249;
+    --color-bg: 255 255 255;
+    --color-text: 0 0 0;
+    --color-text-secondary: 30 41 59;
+    --color-border: 0 0 0;
+
+    --color-sidebar-bg: 0 0 0;
+    --color-sidebar-text: 255 255 255;
+    --color-sidebar-border: 75 85 99;
+    --color-sidebar-hover: 30 41 59;
+    --color-sidebar-active-bg: 29 78 216;
+    --color-sidebar-active-text: 255 255 255;
+    --color-sidebar-muted: 209 213 219;
+
+    --color-brand: #1d4ed8;
+    --color-brand-hover: #1e40af;
+    --color-brand-soft: #dbeafe;
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ═══ New Themes (ported from SMMT/DOPAMS) ═══ */
+
+  /* ── Rolex ── deep green + gold */
+  [data-theme="rolex"] {
+    color-scheme: dark;
+    --color-logo-accent: #ffffff;
+
+    --color-primary-50:  253 250 237;
+    --color-primary-100: 250 242 216;
+    --color-primary-200: 245 230 178;
+    --color-primary-300: 238 212 135;
+    --color-primary-400: 224 192 95;
+    --color-primary-500: 197 168 103;
+    --color-primary-600: 168 140 70;
+    --color-primary-700: 138 110 48;
+    --color-primary-800: 110 86 34;
+    --color-primary-900: 87 68 22;
+
+    --color-surface: 20 71 44;
+    --color-surface-alt: 10 46 26;
+    --color-bg: 10 46 26;
+    --color-text: 245 240 228;
+    --color-text-secondary: 201 191 168;
+    --color-border: 42 107 71;
+
+    --color-sidebar-bg: 6 35 18;
+    --color-sidebar-text: 245 240 228;
+    --color-sidebar-border: 20 71 44;
+    --color-sidebar-hover: 10 46 26;
+    --color-sidebar-active-bg: 197 168 103;
+    --color-sidebar-active-text: 10 46 26;
+    --color-sidebar-muted: 168 157 133;
+
+    --color-brand: #c5a867;
+    --color-brand-hover: #d4bc82;
+    --color-brand-soft: rgba(197, 168, 103, 0.18);
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── Gruvbox ── retro warm brown + orange */
+  [data-theme="gruvbox"] {
+    color-scheme: dark;
+    --color-logo-accent: #ffffff;
+
+    --color-primary-50:  255 247 237;
+    --color-primary-100: 255 233 199;
+    --color-primary-200: 254 210 148;
+    --color-primary-300: 253 181 90;
+    --color-primary-400: 254 147 40;
+    --color-primary-500: 254 128 25;
+    --color-primary-600: 234 97 12;
+    --color-primary-700: 194 73 12;
+    --color-primary-800: 156 55 14;
+    --color-primary-900: 126 44 12;
+
+    --color-surface: 60 56 54;
+    --color-surface-alt: 40 40 40;
+    --color-bg: 40 40 40;
+    --color-text: 235 219 178;
+    --color-text-secondary: 213 196 161;
+    --color-border: 80 73 69;
+
+    --color-sidebar-bg: 32 32 32;
+    --color-sidebar-text: 235 219 178;
+    --color-sidebar-border: 60 56 54;
+    --color-sidebar-hover: 40 40 40;
+    --color-sidebar-active-bg: 254 128 25;
+    --color-sidebar-active-text: 40 40 40;
+    --color-sidebar-muted: 168 153 132;
+
+    --color-brand: #fe8019;
+    --color-brand-hover: #fea04d;
+    --color-brand-soft: rgba(254, 128, 25, 0.16);
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── One Dark ── cool dark grey + muted blue */
+  [data-theme="onedark"] {
+    color-scheme: dark;
+    --color-logo-accent: #ffffff;
+
+    --color-primary-50:  236 246 255;
+    --color-primary-100: 218 238 254;
+    --color-primary-200: 189 222 252;
+    --color-primary-300: 148 200 248;
+    --color-primary-400: 114 182 245;
+    --color-primary-500: 97 175 239;
+    --color-primary-600: 70 148 215;
+    --color-primary-700: 52 118 185;
+    --color-primary-800: 40 92 152;
+    --color-primary-900: 32 72 120;
+
+    --color-surface: 53 59 69;
+    --color-surface-alt: 40 44 52;
+    --color-bg: 40 44 52;
+    --color-text: 171 178 191;
+    --color-text-secondary: 157 165 180;
+    --color-border: 69 76 89;
+
+    --color-sidebar-bg: 33 37 43;
+    --color-sidebar-text: 171 178 191;
+    --color-sidebar-border: 53 59 69;
+    --color-sidebar-hover: 40 44 52;
+    --color-sidebar-active-bg: 97 175 239;
+    --color-sidebar-active-text: 40 44 52;
+    --color-sidebar-muted: 127 135 153;
+
+    --color-brand: #61afef;
+    --color-brand-hover: #79bff2;
+    --color-brand-soft: rgba(97, 175, 239, 0.16);
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── Rose Pine ── muted dark + dusty rose/iris */
+  [data-theme="rosepine"] {
+    color-scheme: dark;
+    --color-logo-accent: #ffffff;
+
+    --color-primary-50:  245 241 252;
+    --color-primary-100: 236 228 250;
+    --color-primary-200: 223 210 246;
+    --color-primary-300: 210 190 241;
+    --color-primary-400: 200 175 236;
+    --color-primary-500: 196 167 231;
+    --color-primary-600: 170 140 210;
+    --color-primary-700: 142 112 185;
+    --color-primary-800: 114 86 158;
+    --color-primary-900: 90 66 128;
+
+    --color-surface: 38 35 58;
+    --color-surface-alt: 25 23 36;
+    --color-bg: 25 23 36;
+    --color-text: 224 222 244;
+    --color-text-secondary: 196 192 224;
+    --color-border: 61 56 86;
+
+    --color-sidebar-bg: 21 19 30;
+    --color-sidebar-text: 224 222 244;
+    --color-sidebar-border: 38 35 58;
+    --color-sidebar-hover: 25 23 36;
+    --color-sidebar-active-bg: 196 167 231;
+    --color-sidebar-active-text: 25 23 36;
+    --color-sidebar-muted: 144 140 170;
+
+    --color-brand: #c4a7e7;
+    --color-brand-hover: #d1b9ec;
+    --color-brand-soft: rgba(196, 167, 231, 0.16);
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── Ayu ── clean dark + warm golden accent */
+  [data-theme="ayu"] {
+    color-scheme: dark;
+    --color-logo-accent: #ffffff;
+
+    --color-primary-50:  255 251 237;
+    --color-primary-100: 254 244 210;
+    --color-primary-200: 252 234 170;
+    --color-primary-300: 248 218 122;
+    --color-primary-400: 240 198 82;
+    --color-primary-500: 230 180 80;
+    --color-primary-600: 200 152 52;
+    --color-primary-700: 168 122 36;
+    --color-primary-800: 136 96 24;
+    --color-primary-900: 108 76 16;
+
+    --color-surface: 26 30 40;
+    --color-surface-alt: 11 14 20;
+    --color-bg: 11 14 20;
+    --color-text: 191 189 182;
+    --color-text-secondary: 157 161 168;
+    --color-border: 43 51 64;
+
+    --color-sidebar-bg: 7 10 14;
+    --color-sidebar-text: 191 189 182;
+    --color-sidebar-border: 26 30 40;
+    --color-sidebar-hover: 11 14 20;
+    --color-sidebar-active-bg: 230 180 80;
+    --color-sidebar-active-text: 11 14 20;
+    --color-sidebar-muted: 115 119 138;
+
+    --color-brand: #e6b450;
+    --color-brand-hover: #edc46e;
+    --color-brand-soft: rgba(230, 180, 80, 0.14);
+    --color-text-on-brand: #111111;
+  }
+
+  /* ── GitHub Dark ── clean dark + blue/green */
+  [data-theme="github-dark"] {
+    color-scheme: dark;
+    --color-logo-accent: #ffffff;
+
+    --color-primary-50:  236 245 255;
+    --color-primary-100: 218 237 255;
+    --color-primary-200: 188 220 255;
+    --color-primary-300: 150 200 255;
+    --color-primary-400: 115 180 255;
+    --color-primary-500: 88 166 255;
+    --color-primary-600: 62 140 230;
+    --color-primary-700: 42 112 200;
+    --color-primary-800: 30 88 168;
+    --color-primary-900: 22 68 135;
+
+    --color-surface: 22 27 34;
+    --color-surface-alt: 13 17 23;
+    --color-bg: 13 17 23;
+    --color-text: 230 237 243;
+    --color-text-secondary: 177 186 196;
+    --color-border: 48 54 61;
+
+    --color-sidebar-bg: 9 12 16;
+    --color-sidebar-text: 230 237 243;
+    --color-sidebar-border: 22 27 34;
+    --color-sidebar-hover: 13 17 23;
+    --color-sidebar-active-bg: 88 166 255;
+    --color-sidebar-active-text: 13 17 23;
+    --color-sidebar-muted: 139 148 158;
+
+    --color-brand: #58a6ff;
+    --color-brand-hover: #79b8ff;
+    --color-brand-soft: rgba(88, 166, 255, 0.15);
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── Sunset ── warm deep bg + coral/amber */
+  [data-theme="sunset"] {
+    color-scheme: dark;
+    --color-logo-accent: #ffffff;
+
+    --color-primary-50:  255 247 240;
+    --color-primary-100: 255 236 220;
+    --color-primary-200: 255 218 190;
+    --color-primary-300: 255 196 155;
+    --color-primary-400: 255 175 120;
+    --color-primary-500: 255 158 100;
+    --color-primary-600: 234 128 70;
+    --color-primary-700: 200 98 48;
+    --color-primary-800: 165 76 32;
+    --color-primary-900: 132 58 20;
+
+    --color-surface: 47 26 40;
+    --color-surface-alt: 28 16 24;
+    --color-bg: 28 16 24;
+    --color-text: 245 230 224;
+    --color-text-secondary: 212 184 176;
+    --color-border: 77 46 66;
+
+    --color-sidebar-bg: 22 12 18;
+    --color-sidebar-text: 245 230 224;
+    --color-sidebar-border: 47 26 40;
+    --color-sidebar-hover: 28 16 24;
+    --color-sidebar-active-bg: 255 158 100;
+    --color-sidebar-active-text: 28 16 24;
+    --color-sidebar-muted: 168 142 133;
+
+    --color-brand: #ff9e64;
+    --color-brand-hover: #ffb07e;
+    --color-brand-soft: rgba(255, 158, 100, 0.16);
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ── Monokai ── near-black + vibrant pink */
+  [data-theme="monokai"] {
+    color-scheme: dark;
+    --color-logo-accent: #ffffff;
+
+    --color-primary-50:  255 236 243;
+    --color-primary-100: 254 218 232;
+    --color-primary-200: 252 190 214;
+    --color-primary-300: 250 155 188;
+    --color-primary-400: 249 112 156;
+    --color-primary-500: 249 38 114;
+    --color-primary-600: 225 28 95;
+    --color-primary-700: 192 20 78;
+    --color-primary-800: 158 16 62;
+    --color-primary-900: 128 12 48;
+
+    --color-surface: 53 54 48;
+    --color-surface-alt: 39 40 34;
+    --color-bg: 39 40 34;
+    --color-text: 248 248 242;
+    --color-text-secondary: 204 204 196;
+    --color-border: 74 75 66;
+
+    --color-sidebar-bg: 30 31 26;
+    --color-sidebar-text: 248 248 242;
+    --color-sidebar-border: 53 54 48;
+    --color-sidebar-hover: 39 40 34;
+    --color-sidebar-active-bg: 249 38 114;
+    --color-sidebar-active-text: 248 248 242;
+    --color-sidebar-muted: 166 166 156;
+
+    --color-brand: #f92672;
+    --color-brand-hover: #fa4d8d;
+    --color-brand-soft: rgba(249, 38, 114, 0.16);
+    --color-text-on-brand: #ffffff;
+  }
+
+  /* ═══ Base Styles ═══ */
+
   body {
-    @apply antialiased text-gray-900;
+    @apply antialiased;
+    color: rgb(var(--color-text));
+    background-color: rgb(var(--color-bg));
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Component Classes — Button Variants, Sidebar, Bottom Nav
+   ═══════════════════════════════════════════════════════════ */
+
+@layer components {
+  /* ── Primary Button ── gradient + lift animation */
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 2.75rem;
+    padding: 0.5rem 1rem;
+    border-radius: 0.75rem;
+    border: 1px solid color-mix(in srgb, var(--color-brand), #0f172a 32%);
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    white-space: nowrap;
+    background: linear-gradient(135deg, var(--color-brand), color-mix(in srgb, var(--color-brand), #0f172a 22%));
+    color: var(--color-text-on-brand);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--color-brand), transparent 78%);
+    transition: background 140ms ease, border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: linear-gradient(135deg, var(--color-brand-hover), color-mix(in srgb, var(--color-brand-hover), #0f172a 18%));
+    transform: translateY(-1px);
+    box-shadow: 0 8px 18px color-mix(in srgb, var(--color-brand), transparent 74%);
+  }
+  .btn-primary:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px color-mix(in srgb, var(--color-brand), transparent 76%);
+  }
+  .btn-primary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .btn-primary:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgb(var(--color-bg)), 0 0 0 4px var(--color-brand);
+  }
+
+  /* ── Full-width variant ── */
+  .btn-primary--full {
+    width: 100%;
+  }
+
+  /* ── Secondary Button ── surface bg with border */
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 2.75rem;
+    padding: 0.5rem 1rem;
+    border-radius: 0.75rem;
+    border: 1px solid rgb(var(--color-border));
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    white-space: nowrap;
+    background: rgb(var(--color-surface));
+    color: rgb(var(--color-text));
+    transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--color-brand-soft), rgb(var(--color-surface)) 72%);
+    transform: translateY(-1px);
+  }
+  .btn-secondary:active:not(:disabled) {
+    transform: translateY(0);
+  }
+  .btn-secondary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  /* ── Ghost Button ── transparent bg */
+  .btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 2.75rem;
+    padding: 0.5rem 1rem;
+    border-radius: 0.75rem;
+    border: 1px solid rgb(var(--color-border));
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    white-space: nowrap;
+    background: transparent;
+    color: rgb(var(--color-text-secondary));
+    transition: background 140ms ease, color 140ms ease;
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: rgb(var(--color-surface-alt));
+    color: rgb(var(--color-text));
+  }
+  .btn-ghost:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  /* ── Danger Button ── semantic danger gradient */
+  .btn-danger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 2.75rem;
+    padding: 0.5rem 1rem;
+    border-radius: 0.75rem;
+    border: 1px solid color-mix(in srgb, rgb(var(--color-danger)), #0f172a 32%);
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    white-space: nowrap;
+    background: linear-gradient(135deg, rgb(var(--color-danger)), color-mix(in srgb, rgb(var(--color-danger)), #0f172a 22%));
+    color: #ffffff;
+    box-shadow: 0 4px 12px color-mix(in srgb, rgb(var(--color-danger)), transparent 78%);
+    transition: background 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: linear-gradient(
+      135deg,
+      color-mix(in srgb, rgb(var(--color-danger)), #0f172a 12%),
+      color-mix(in srgb, rgb(var(--color-danger)), #0f172a 26%)
+    );
+    transform: translateY(-1px);
+    box-shadow: 0 8px 18px color-mix(in srgb, rgb(var(--color-danger)), transparent 74%);
+  }
+  .btn-danger:active:not(:disabled) {
+    transform: translateY(0);
+  }
+  .btn-danger:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  /* ── Sidebar Collapse Transitions ── */
+  .sidebar-transition {
+    transition: width 200ms ease;
+  }
+  .sidebar-main-transition {
+    transition: margin-left 200ms ease, padding-left 200ms ease;
+  }
+
+  /* Collapsed sidebar: CSS tooltips */
+  .sidebar-collapsed [data-tooltip] {
+    position: relative;
+  }
+  .sidebar-collapsed [data-tooltip]:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+    margin-left: 0.5rem;
+    padding: 0.25rem 0.75rem;
+    background: var(--color-brand);
+    color: var(--color-text-on-brand);
+    border-radius: 0.375rem;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    z-index: 100;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  }
+
+  /* ── Bottom Navigation (mobile) ── */
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 50;
+    background: rgb(var(--color-surface));
+    border-top: 1px solid rgb(var(--color-border));
+    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.06);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .bottom-nav__tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.125rem;
+    padding: 0.375rem 0 0.25rem;
+    min-height: 3.25rem;
+    border: none;
+    background: transparent;
+    color: rgb(var(--color-text-secondary));
+    font-size: 0.65rem;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: color 120ms ease;
+  }
+  .bottom-nav__tab:active {
+    background: rgb(var(--color-surface-alt));
+  }
+  .bottom-nav__tab--active {
+    color: var(--color-brand);
+  }
+}
+
+@layer utilities {
+  .surface-brand-soft {
+    background: color-mix(in srgb, var(--color-brand-soft), rgb(var(--color-surface)) 12%);
+  }
+
+  .surface-success-soft {
+    background: rgb(var(--color-success-soft));
+  }
+
+  .surface-warning-soft {
+    background: rgb(var(--color-warning-soft));
+  }
+
+  .surface-danger-soft {
+    background: rgb(var(--color-danger-soft));
+  }
+
+  .border-success-soft {
+    border-color: rgb(var(--color-success-border));
+  }
+
+  .border-warning-soft {
+    border-color: rgb(var(--color-warning-border));
+  }
+
+  .border-danger-soft {
+    border-color: rgb(var(--color-danger-border));
+  }
+
+  .text-brand {
+    color: var(--color-brand);
+  }
+
+  .text-success {
+    color: rgb(var(--color-success));
+  }
+
+  .text-warning {
+    color: rgb(var(--color-warning));
+  }
+
+  .text-danger {
+    color: rgb(var(--color-danger));
+  }
+
+  .bg-danger {
+    background: rgb(var(--color-danger));
+  }
+
+  .border-danger {
+    border-color: rgb(var(--color-danger));
+  }
+
+  .hover-surface-brand-soft:hover {
+    background: color-mix(in srgb, var(--color-brand-soft), rgb(var(--color-surface)) 4%);
+  }
+
+  .hover-surface-danger-soft:hover {
+    background: color-mix(in srgb, rgb(var(--color-danger-soft)), rgb(var(--color-surface)) 16%);
+  }
+
+  .hover-text-brand:hover {
+    color: color-mix(in srgb, var(--color-brand), rgb(var(--color-text)) 18%);
+  }
+
+  .hover-text-success:hover {
+    color: rgb(var(--color-success));
+  }
+
+  .hover-text-danger:hover {
+    color: rgb(var(--color-danger));
+  }
+
+  .status-dot-brand {
+    background: rgb(var(--color-primary-500));
+  }
+
+  .status-dot-success {
+    background: rgb(var(--color-success));
+  }
+
+  .status-dot-warning {
+    background: rgb(var(--color-warning));
+  }
+
+  .status-dot-danger {
+    background: rgb(var(--color-danger));
+  }
+
+  .status-dot-muted {
+    background: rgb(var(--color-surface-alt));
+  }
+
+  .badge-brand {
+    background: color-mix(in srgb, var(--color-brand-soft), rgb(var(--color-surface)) 12%);
+    color: rgb(var(--color-primary-700));
+  }
+
+  .badge-success {
+    background: rgb(var(--color-success-soft));
+    color: rgb(var(--color-success));
+  }
+
+  .badge-warning {
+    background: rgb(var(--color-warning-soft));
+    color: rgb(var(--color-warning));
+  }
+
+  .badge-danger {
+    background: rgb(var(--color-danger-soft));
+    color: rgb(var(--color-danger));
+  }
+
+  .badge-neutral {
+    background: rgb(var(--color-surface-alt));
+    color: rgb(var(--color-text-secondary));
   }
 }

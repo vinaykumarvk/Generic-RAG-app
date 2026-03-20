@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
-import { apiPost, apiFetch } from "@/lib/api";
+import { apiPost, buildApiUrl } from "@/lib/api";
 
 interface AuthUser {
   user_id: string;
@@ -11,10 +11,9 @@ interface AuthUser {
 
 interface AuthContextValue {
   user: AuthUser | null;
-  token: string | null;
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   isAdmin: boolean;
 }
 
@@ -22,37 +21,55 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem("intellirag_token"));
-  const [isLoading, setIsLoading] = useState(!!token);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (!token) return;
-    apiFetch<AuthUser>("/api/v1/users/me")
-      .then(setUser)
-      .catch(() => {
-        localStorage.removeItem("intellirag_token");
-        setToken(null);
-      })
-      .finally(() => setIsLoading(false));
-  }, [token]);
+    let cancelled = false;
+    localStorage.removeItem("intellirag_token");
+
+    async function bootstrapAuth() {
+      try {
+        const res = await fetch(buildApiUrl("/api/v1/users/me"), { credentials: "include" });
+        if (!res.ok) {
+          if (res.status !== 401) {
+            throw new Error(`Failed to load current user (${res.status})`);
+          }
+          if (!cancelled) setUser(null);
+          return;
+        }
+        const currentUser = await res.json() as AuthUser | null;
+        if (!cancelled) setUser(currentUser);
+      } catch {
+        if (!cancelled) setUser(null);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+
+    void bootstrapAuth();
+    return () => { cancelled = true; };
+  }, []);
 
   const login = useCallback(async (username: string, password: string) => {
-    const result = await apiPost<{ token: string; user: AuthUser }>("/api/v1/auth/login", { username, password });
-    localStorage.setItem("intellirag_token", result.token);
-    setToken(result.token);
+    const result = await apiPost<{ user: AuthUser }>("/api/v1/auth/login", { username, password });
+    localStorage.removeItem("intellirag_token");
     setUser(result.user);
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    try {
+      await apiPost<{ success: boolean }>("/api/v1/auth/logout", {});
+    } catch {
+      // Clear local auth state even if logout confirmation fails.
+    }
     localStorage.removeItem("intellirag_token");
-    setToken(null);
     setUser(null);
   }, []);
 
   const isAdmin = user?.user_type === "ADMIN";
 
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, logout, isAdmin }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout, isAdmin }}>
       {children}
     </AuthContext.Provider>
   );

@@ -65,11 +65,11 @@ export function createIdempotencyMiddleware(config: IdempotencyMiddlewareConfig)
       }
 
       // Store the key for the onResponse hook
-      (request as any)._idempotencyKey = key;
+      request._idempotencyKey = key;
     });
 
     app.addHook("onResponse", async (request: FastifyRequest, reply: FastifyReply) => {
-      const key = (request as any)._idempotencyKey as string | undefined;
+      const key = request._idempotencyKey;
       if (!key) return;
 
       // Only cache successful responses (2xx)
@@ -82,7 +82,7 @@ export function createIdempotencyMiddleware(config: IdempotencyMiddlewareConfig)
           `INSERT INTO idempotency_cache (idempotency_key, response_status, response_body, expires_at)
            VALUES ($1, $2, $3, $4)
            ON CONFLICT (idempotency_key) DO NOTHING`,
-          [key, reply.statusCode, (reply as any)._idempotencyBody ?? null, expiresAt]
+          [key, reply.statusCode, reply._idempotencyBody ?? null, expiresAt]
         );
       } catch (err) {
         request.log.warn({ error: (err as Error).message }, "IDEMPOTENCY_CACHE_STORE_FAILED");
@@ -91,14 +91,14 @@ export function createIdempotencyMiddleware(config: IdempotencyMiddlewareConfig)
 
     // Capture the response body for caching
     app.addHook("onSend", async (request: FastifyRequest, reply: FastifyReply, payload: string) => {
-      const key = (request as any)._idempotencyKey as string | undefined;
+      const key = request._idempotencyKey;
       if (!key) return payload;
 
       if (reply.statusCode >= 200 && reply.statusCode < 300) {
         try {
-          (reply as any)._idempotencyBody = typeof payload === "string" ? JSON.parse(payload) : payload;
+          reply._idempotencyBody = typeof payload === "string" ? JSON.parse(payload) : payload;
         } catch {
-          (reply as any)._idempotencyBody = null;
+          reply._idempotencyBody = null;
         }
       }
       return payload;

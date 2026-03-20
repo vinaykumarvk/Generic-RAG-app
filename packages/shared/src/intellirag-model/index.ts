@@ -8,3 +8,7 @@ export * from "./retrieval";
 export * from "./feedback";
 export * from "./ingestion-job";
 export * from "./llm-config";
+export * from "./system-setting";
+export * from "./org-unit";
+export * from "./access-grant";
+export * from "./review-queue";

@@ -284,10 +284,10 @@ export class WorkflowEngine {
             toStateId: pcd.toStateId,
             newRowVersion: pcd.newRowVersion,
           });
-        } catch (hookErr: any) {
+        } catch (hookErr: unknown) {
           this.logger.error("onAfterTransition hook failed", {
             entityId: entityRef.entityId,
-            error: hookErr?.message ?? "unknown_error",
+            error: hookErr instanceof Error ? hookErr.message : "unknown_error",
           });
         }
       }
@@ -298,12 +298,12 @@ export class WorkflowEngine {
         error: result.success ? undefined : result.error,
         errorCode: result.success ? undefined : result.errorCode,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.logger.error("Workflow transition failed", {
         entityId: entityRef.entityId,
         entityType: entityRef.entityType,
         transitionId,
-        error: err?.message ?? "unknown_error",
+        error: err instanceof Error ? err.message : "unknown_error",
       });
 
       // Fire onTransitionError lifecycle hook
@@ -315,15 +315,15 @@ export class WorkflowEngine {
             actor,
             remarks,
             payload,
-            error: err,
+            error: err instanceof Error ? err : new Error(String(err)),
             errorCode: err instanceof TransitionError || err instanceof GuardError
               ? err.errorCode
               : undefined,
           });
-        } catch (hookErr: any) {
+        } catch (hookErr: unknown) {
           this.logger.error("onTransitionError hook failed", {
             entityId: entityRef.entityId,
-            error: hookErr?.message ?? "unknown_error",
+            error: hookErr instanceof Error ? hookErr.message : "unknown_error",
           });
         }
       }
@@ -338,7 +338,7 @@ export class WorkflowEngine {
 
       return {
         success: false,
-        error: err.message ?? "unknown_error",
+        error: err instanceof Error ? err.message : "unknown_error",
       };
     }
   }
@@ -364,11 +364,11 @@ export class WorkflowEngine {
           data.actor,
           data.payload
         );
-      } catch (err: any) {
+      } catch (err: unknown) {
         this.logger.error(`Post-commit hook ${hook.hookId} failed`, {
           hookId: hook.hookId,
           entityId: data.entityRef.entityId,
-          error: err?.message ?? "unknown_error",
+          error: err instanceof Error ? err.message : "unknown_error",
         });
         // Post-commit hook failures are logged, not thrown
       }

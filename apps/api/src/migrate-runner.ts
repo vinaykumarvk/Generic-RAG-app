@@ -38,7 +38,7 @@ export async function runMigrations(pool: Pool): Promise<void> {
       if (appliedVersions.has(version)) continue;
 
       const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), "utf-8");
-      console.log(`Applying migration ${file}...`);
+      process.stdout.write(`Applying migration ${file}...\n`);
       await client.query("BEGIN");
       try {
         await client.query(sql);
@@ -47,10 +47,10 @@ export async function runMigrations(pool: Pool): Promise<void> {
           [version, file]
         );
         await client.query("COMMIT");
-        console.log(`Migration ${file} applied successfully`);
+        process.stdout.write(`Migration ${file} applied successfully\n`);
       } catch (err) {
         await client.query("ROLLBACK");
-        console.error(`Migration ${file} failed:`, err);
+        process.stderr.write(`Migration ${file} failed: ${String(err)}\n`);
         throw err;
       }
     }

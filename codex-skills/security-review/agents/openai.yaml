@@ -1,0 +1,4 @@
+interface:
+  display_name: "Security Review"
+  short_description: "Review auth, data protection, and exploit risk"
+  default_prompt: "Use $security-review to audit the codebase for authentication, authorization, and data-protection issues."

@@ -7,8 +7,11 @@ import { z } from "zod";
 export const RagUserTypeSchema = z.enum(["ADMIN", "MEMBER", "VIEWER", "API_KEY"]);
 export type RagUserType = z.infer<typeof RagUserTypeSchema>;
 
-export const UserStatusSchema = z.enum(["ACTIVE", "DISABLED", "LOCKED"]);
+export const UserStatusSchema = z.enum(["ACTIVE", "DISABLED", "LOCKED", "ARCHIVED"]);
 export type UserStatus = z.infer<typeof UserStatusSchema>;
+
+export const UserSensitivityClearanceSchema = z.enum(["PUBLIC", "INTERNAL", "RESTRICTED", "SEALED"]);
+export type UserSensitivityClearance = z.infer<typeof UserSensitivityClearanceSchema>;
 
 export const UserSchema = z.object({
   user_id: z.string().uuid(),
@@ -20,6 +23,10 @@ export const UserSchema = z.object({
   password_hash: z.string().optional(),
   avatar_url: z.string().url().optional(),
   last_login_at: z.string().datetime().optional(),
+  archived_at: z.string().datetime().optional(),
+  archived_by: z.string().uuid().optional(),
+  org_unit_id: z.string().uuid().optional(),
+  sensitivity_clearance: UserSensitivityClearanceSchema.default("INTERNAL"),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
 });

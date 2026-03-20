@@ -1,6 +1,6 @@
 ---
 name: ui-review
-description: End-to-end UI/UX quality review covering accessibility, responsive design, i18n, interaction states, design system integrity, and frontend performance. Produces a prioritized improvement plan with a release-readiness verdict.
+description: End-to-end UI/UX quality review covering login completeness, mobile-first navigation (collapsible sidebar, menu icons, hamburger toggle), accessibility, responsive design, empty/error/loading states, dark mode, modern UI patterns (toasts, modals, forms, tables, search), i18n, design system integrity, and frontend performance. Produces a prioritized improvement plan with a release-readiness verdict.
 argument-hint: "[target] [phase]"
 ---
 
@@ -13,7 +13,7 @@ Perform an end-to-end UI/UX quality review and produce a prioritized, actionable
 If the user specifies a target (example: `/ui-review apps/citizen`), review only that app. Otherwise review all UI apps.
 
 If the user specifies a phase (example: `/ui-review accessibility only`), run only that section.
-Valid phase keywords: `preflight`, `scan`, `design-system`, `responsive`, `accessibility`, `interaction`, `states`, `i18n`, `performance`, `gates`, `compliance`, `backlog`, `quickwins`.
+Valid phase keywords: `preflight`, `scan`, `login`, `design-system`, `navigation`, `responsive`, `accessibility`, `interaction`, `states`, `empty-error`, `i18n`, `performance`, `gates`, `compliance`, `backlog`, `quickwins`.
 
 If target includes `/`, generate a safe output slug:
 
@@ -23,7 +23,21 @@ If target includes `/`, generate a safe output slug:
 
 ## Project Context
 
-This monorepo has five UI apps and one shared UI package:
+This monorepo may contain one or more UI apps. Detect the actual apps present by scanning `apps/*/src` for React entry points.
+
+**IntelliRAG** (primary app when present):
+
+```text
+apps/
+  web/              - React (Vite + Tailwind) RAG platform UI
+                      Pages: Login, Dashboard, Workspace, Documents, Query, Graph Explorer, Admin
+                      Layout: Sidebar + Header shell (AppLayout)
+                      Theming: 14 themes via CSS custom properties + data-theme attribute
+packages/
+  shared/           - Shared types, schemas, UI components
+```
+
+**Policing apps** (when present):
 
 ```text
 apps/
@@ -36,7 +50,7 @@ packages/
   shared/           - Shared UI primitives and utilities
 ```
 
-Primary requirements source: `docs/policing_apps_brd/`.
+Primary requirements source: `docs/policing_apps_brd/` (policing) or `CLAUDE.md` (IntelliRAG).
 
 ### Locale Matrix
 
@@ -99,6 +113,99 @@ All three policing UIs use a redesigned login screen with these features:
 - Login i18n keys must exist in all 3 locale files (en, hi, te).
 - Remember Me must not store passwords — only the username.
 - Theme selector must show all themes defined in the theme system.
+
+### 2B. Full-Fledged Login Screen Checklist (Universal)
+
+Every app MUST have a production-quality login screen. This checklist applies universally (not just policing apps). Score each item as PRESENT, PARTIAL, or MISSING.
+
+#### Layout & Visual Design
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| L-01 | Full-viewport centered layout (`min-h-[100dvh]` or `100dvh`, NOT `100vh`) | P1 |
+| L-02 | Card/panel with consistent elevation (shadow + border-radius via design tokens) | P2 |
+| L-03 | Branded header: app logo/icon + app name + optional tagline | P1 |
+| L-04 | Visual hierarchy: logo → heading → form → secondary actions → footer | P2 |
+| L-05 | Background treatment (gradient, pattern, or image) that works in light AND dark mode | P2 |
+| L-06 | Max-width constraint on card (e.g., `max-w-md`) to prevent over-stretching on desktop | P2 |
+| L-07 | Responsive padding: tighter on mobile (`p-6`), roomier on desktop (`sm:p-8` or larger) | P2 |
+| L-08 | Footer with copyright/version/help link below the card | P3 |
+
+#### Form & Input Quality
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| F-01 | Username/email field with appropriate `type`, `autocomplete="username"`, leading icon | P1 |
+| F-02 | Password field with `type="password"`, `autocomplete="current-password"`, leading icon | P1 |
+| F-03 | Password visibility toggle (eye icon button with `aria-label`) | P1 |
+| F-04 | Input font-size >= 16px (`text-base`) to prevent iOS Safari auto-zoom | P1 |
+| F-05 | Auto-focus on first empty field on mount | P2 |
+| F-06 | Enter key submits form (native `<form>` with `onSubmit`) | P1 |
+| F-07 | Input validation with clear inline error messages | P1 |
+| F-08 | `maxLength` on inputs to prevent abuse | P3 |
+| F-09 | Labels associated with inputs (explicit `<label htmlFor>` or `aria-label`) | P1 |
+
+#### Authentication UX Features
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| A-01 | "Remember me" checkbox that persists username (NOT password) via localStorage | P2 |
+| A-02 | "Forgot password" flow (in-page panel swap or modal, NOT a separate route) | P2 |
+| A-03 | Loading state on submit button (spinner + disabled + text change) | P1 |
+| A-04 | Double-submit prevention (button disabled during request) | P1 |
+| A-05 | Error display: icon + message in alert banner with `role="alert"` or `aria-live="assertive"` | P1 |
+| A-06 | Error dismissal on new input (clear error when user types) | P2 |
+| A-07 | Info/success messages visually distinct from errors (different color/icon) | P2 |
+| A-08 | Redirect to intended page after login (not always dashboard) | P2 |
+| A-09 | Session expiry message when redirected to login from expired session | P2 |
+
+#### Theme & Dark Mode
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| T-01 | Theme selector accessible on login page (user can switch before logging in) | P2 |
+| T-02 | All themes render correctly on login (no missing variables, no white-on-white) | P1 |
+| T-03 | Dark mode: inputs, card, background, text all properly themed | P1 |
+| T-04 | Theme persists across page reload (localStorage) | P2 |
+| T-05 | No flash of unstyled/wrong theme on page load | P2 |
+
+#### Accessibility (Login-Specific)
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| X-01 | `<main>` landmark wrapping login content | P1 |
+| X-02 | Heading hierarchy: single `<h1>` for app name or "Sign In" | P1 |
+| X-03 | `aria-describedby` linking error messages to relevant inputs | P1 |
+| X-04 | `aria-invalid` on fields with validation errors | P1 |
+| X-05 | `focus-visible` rings on ALL interactive elements (inputs, buttons, links, checkbox) | P1 |
+| X-06 | Touch targets >= 44px on all buttons and interactive elements | P1 |
+| X-07 | Color contrast >= 4.5:1 for all text including placeholder, helper, and footer text | P1 |
+| X-08 | Screen reader live region (`aria-live="assertive"`) for dynamic error/success messages | P1 |
+
+#### Responsive Login
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| R-01 | Renders correctly at 320px width (no horizontal overflow) | P1 |
+| R-02 | Card fills viewport width on small screens with appropriate margins | P1 |
+| R-03 | Comfortable at 360px, 768px, 1280px (the 3 key breakpoints) | P2 |
+| R-04 | Virtual keyboard does not obscure the form on mobile (scroll into view) | P2 |
+
+**Login screen verification commands:**
+```bash
+# Check login page exists and has key features
+rg -n 'password|Password' apps/*/src --glob '*ogin*' -l
+rg -n 'rememberMe|remember' apps/*/src --glob '*ogin*'
+rg -n 'forgot|Forgot' apps/*/src --glob '*ogin*'
+rg -n 'aria-live|role="alert"' apps/*/src --glob '*ogin*'
+rg -n 'autocomplete=' apps/*/src --glob '*ogin*'
+rg -n '100dvh|100vh' apps/*/src --glob '*ogin*'
+rg -n 'focus-visible' apps/*/src --glob '*ogin*'
+# Check for proper form element
+rg -n '<form' apps/*/src --glob '*ogin*'
+# Check for loading/disabled state on submit
+rg -n 'disabled.*loading|loading.*disabled' apps/*/src --glob '*ogin*'
+```
 
 ### 3. Dashboard Drill-Down (Clickable Stat Cards)
 
@@ -192,6 +299,20 @@ Risk Score to severity mapping: `16-25 = P0`, `9-15 = P1`, `4-8 = P2`, `1-3 = P3
 | Missing i18n key in locale file | P1 | Untranslated text shown to users |
 | Form input font-size < 1rem on mobile | P2 | Triggers iOS Safari auto-zoom |
 | Horizontal overflow at 320px | P1 | Content unreachable on small phones |
+| Sidebar not collapsible on mobile | P0 | Sidebar covers entire screen, no way to access content |
+| Menu items without icons | P1 | Poor visual scanning, inconsistent navigation UX |
+| Missing hamburger/menu toggle on mobile | P0 | No way to open navigation on mobile devices |
+| No empty state on list/table view | P1 | Users see blank screen, think app is broken |
+| Missing React Error Boundary | P1 | Unhandled error crashes entire application to white screen |
+| No 404 catch-all route | P1 | Users see blank page on invalid URLs |
+| Login page missing loading state on submit | P1 | User clicks multiple times, no feedback |
+| Login page missing password visibility toggle | P1 | Poor mobile UX, unable to verify typed password |
+| Missing `prefers-reduced-motion` support | P1 | Accessibility violation for vestibular disorder users |
+| No focus trap in modal/overlay | P1 | Focus escapes to background, unusable for keyboard users |
+| `<div onClick>` instead of semantic `<button>` or `<a>` | P1 | Not keyboard accessible, missing from tab order |
+| Missing `autocomplete` attribute on login inputs | P2 | Password managers and autofill broken |
+| Toast/notification without `aria-live` | P1 | Screen reader users miss feedback messages |
+| No skeleton/loading state on data fetch | P2 | Content jumps (CLS) and perceived slowness |
 
 ## Mandatory Evidence Artifacts
 
@@ -227,13 +348,45 @@ Produce:
 - i18n footprint and hardcoded string candidates.
 - Theme coverage map and likely dark-mode gaps.
 - Faceted filter coverage: which list views have facet endpoints wired up vs still using plain hardcoded options.
-- Login screen feature completeness: logo, remember-me, forgot-password, theme picker, footer, dedicated CSS.
+- Login screen feature completeness: score against Full-Fledged Login Screen Checklist (§2B).
 - Dashboard drill-down coverage: which stat cards navigate and their targets.
+- Navigation pattern: sidebar collapsibility, hamburger toggle presence, menu item icons.
+- Empty state coverage: which views handle empty data with intentional UI vs blank screen.
+- Error boundary coverage: which route segments are wrapped in error boundaries.
+- Loading state coverage: which data-fetching views show skeleton/loading vs nothing.
+- 404/catch-all route: whether unmatched routes show a proper not-found page.
 
 Minimum table:
 
 | App | Route | Screen Component | CSS Source | Shared Components | i18n Status | Theme Status |
 |-----|-------|------------------|------------|-------------------|-------------|--------------|
+
+Additional inventory table for navigation:
+
+| App | Sidebar | Collapsible (Mobile) | Hamburger Toggle | Menu Icons (All Items) | Active State | Touch Target 44px |
+|-----|---------|---------------------|-----------------|----------------------|-------------|------------------|
+
+Additional inventory table for empty/error/loading states:
+
+| App | View/Page | Empty State | Loading/Skeleton | Error Boundary | 404 Page |
+|-----|-----------|-------------|-----------------|---------------|----------|
+
+Additional inventory table for login completeness:
+
+| App | Feature | Status | Notes |
+|-----|---------|--------|-------|
+| | Branded logo + app name | | |
+| | Password visibility toggle | | |
+| | Remember me (username only) | | |
+| | Forgot password flow | | |
+| | Loading state on submit | | |
+| | Error display with aria-live | | |
+| | Theme selector | | |
+| | Dark mode support | | |
+| | 100dvh viewport | | |
+| | Touch targets >= 44px | | |
+| | Responsive at 320px-1280px | | |
+| | Autocomplete attributes | | |
 
 Additional inventory table for faceted filters:
 
@@ -244,7 +397,17 @@ Additional inventory table for faceted filters:
 
 ### A) Token Compliance
 
-- Hardcoded colors bypassing `var(--color-*)`.
+Run the automated lint check first:
+```bash
+npm run lint:theme   # or: bash scripts/lint-theme-tokens.sh [target_dir]
+```
+This catches three violation categories mechanically:
+1. **Hardcoded Tailwind colors** (e.g., `bg-red-50`, `text-gray-600`) — must use token-based classes (`bg-surface`, `text-skin-muted`, `bg-primary-*`).
+2. **Tailwind `dark:` prefix** — non-functional in this project (uses `[data-theme]` attribute, not Tailwind dark mode). All `dark:` classes are dead code.
+3. **Non-existent utility classes** (e.g., `text-text-secondary`, `border-border-primary`) — render as no-ops, causing invisible/missing styling.
+
+Additional manual checks:
+- Hardcoded hex/rgb in CSS files bypassing `var(--color-*)`.
 - Hardcoded spacing/radius/shadow bypassing token vars.
 - Breakpoints declared ad-hoc instead of tokenized values.
 
@@ -386,20 +549,113 @@ Components that render boolean values as badges (e.g., "Yes"/"No") MUST use i18n
 - Search for hardcoded `"Yes"` / `"No"` in views: `rg '"Yes"|"No"' apps/*/src/views --glob '*.tsx'`.
 - Ensure `common.yes` and `common.no` keys exist in all locale files.
 
-## Phase 3: Responsive and Device Behavior
+## Phase 3: Mobile-First Navigation & Layout
 
-### A) Mobile-first Structure
+### A) Collapsible Sidebar Pattern
 
-- Base layout for mobile, desktop enhancements via min-width queries.
-- Avoid `100vh`; prefer `dvh`.
-- Width handling with responsive functions (`min`, `max`, `clamp`) where appropriate.
+Every app with a sidebar MUST implement a mobile-responsive navigation pattern. Score each item:
 
-### B) Breakpoint Discipline
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| NAV-01 | Sidebar collapses on mobile (hidden by default, toggled by hamburger button) | P0 |
+| NAV-02 | Hamburger/menu toggle button visible on mobile (`md:hidden` or equivalent breakpoint) | P0 |
+| NAV-03 | Hamburger button has `aria-label="Open menu"` / `"Close menu"` (dynamic) | P1 |
+| NAV-04 | Hamburger button has `aria-expanded` reflecting sidebar state | P1 |
+| NAV-05 | Sidebar opens as overlay on mobile with backdrop (click backdrop to close) | P1 |
+| NAV-06 | Sidebar closes on route navigation (mobile) | P2 |
+| NAV-07 | Sidebar closeable via Escape key | P1 |
+| NAV-08 | Sidebar slides in with smooth transition (`transform` + `transition`, not display toggle) | P2 |
+| NAV-09 | Body scroll locked when sidebar overlay is open (prevent background scroll) | P2 |
+| NAV-10 | Focus trapped inside sidebar when open as overlay (return focus to hamburger on close) | P1 |
+| NAV-11 | Sidebar has `<nav>` landmark with `aria-label="Main navigation"` | P1 |
+| NAV-12 | On desktop, sidebar can optionally collapse to icon-only rail (nice-to-have) | P3 |
+
+**Sidebar collapse pattern (React + Tailwind):**
+```tsx
+// Mobile: hidden by default, shown via state
+// Desktop: always visible
+<aside className={cn(
+  "fixed inset-y-0 left-0 z-40 w-64 transform transition-transform duration-200",
+  "md:relative md:translate-x-0",  // always visible on desktop
+  isOpen ? "translate-x-0" : "-translate-x-full"  // toggle on mobile
+)}>
+  <nav aria-label="Main navigation">...</nav>
+</aside>
+{isOpen && <div className="fixed inset-0 z-30 bg-black/50 md:hidden" onClick={close} />}
+```
+
+### B) Menu Item Design
+
+Every navigation menu item MUST follow these patterns:
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| MI-01 | Every menu item has a leading icon (consistent icon library, e.g., lucide-react) | P1 |
+| MI-02 | Icon + label aligned horizontally with consistent spacing (`gap-3` or similar) | P2 |
+| MI-03 | Active/current route highlighted with distinct background AND text color | P1 |
+| MI-04 | Hover state on all menu items (background color change) | P1 |
+| MI-05 | Focus-visible ring on all menu items for keyboard navigation | P1 |
+| MI-06 | Touch targets >= 44px height on all menu items | P1 |
+| MI-07 | Menu items use semantic `<a>` or `<NavLink>` elements (not `<div onClick>`) | P1 |
+| MI-08 | Icon size consistent (e.g., all 20px or all 24px) and `aria-hidden="true"` | P2 |
+| MI-09 | Menu sections grouped with headings or visual separators | P2 |
+| MI-10 | Tooltips on menu items when sidebar is in collapsed/icon-only mode | P2 |
+| MI-11 | Active menu item visible without scrolling (scroll-into-view if needed) | P3 |
+| MI-12 | Nested/sub-menu items indented or visually grouped under parent | P3 |
+
+**Verification commands:**
+```bash
+# Check sidebar components exist and have mobile toggle
+rg -n 'hamburger|menu-toggle|isOpen|isSidebarOpen|sidebarOpen' apps/*/src --glob '*.tsx'
+rg -n 'md:hidden.*button|lg:hidden.*button' apps/*/src --glob '*.tsx'
+# Check menu items have icons
+rg -n 'NavLink|nav.*item' apps/*/src/components --glob '*.tsx' -A 2
+# Check for aria attributes on nav
+rg -n 'aria-label.*navigation|aria-expanded' apps/*/src --glob '*.tsx'
+# Check touch targets on nav items
+rg -n 'min-h-\[44px\]|min-h-\[2.75rem\]|h-11|py-3' apps/*/src/components --glob '*idebar*'
+```
+
+### C) Responsive Header Pattern
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| HD-01 | Fixed/sticky header that persists on scroll | P2 |
+| HD-02 | Header height consistent and not overlapping content (proper padding/margin below) | P1 |
+| HD-03 | Mobile: hamburger left, app title center, user/actions right | P2 |
+| HD-04 | Desktop: breadcrumb/title left, user/actions right | P2 |
+| HD-05 | User avatar/info with dropdown for settings/logout | P2 |
+| HD-06 | Header adapts on mobile (hides non-essential elements, shows hamburger) | P1 |
+| HD-07 | Header `z-index` above content but below modals/overlays | P2 |
+
+### D) Mobile-First CSS Architecture
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| MF-01 | Base styles target mobile (no media query = mobile layout) | P1 |
+| MF-02 | Desktop enhancements use `min-width` queries (NOT `max-width` for mobile) | P1 |
+| MF-03 | Tailwind responsive prefixes used correctly: `sm:`, `md:`, `lg:` (mobile-first by default) | P2 |
+| MF-04 | No `max-width` media queries unless for mobile-specific overrides | P2 |
+| MF-05 | `<meta name="viewport" content="width=device-width, initial-scale=1">` present in HTML | P0 |
+| MF-06 | `100dvh` used instead of `100vh` for full-height layouts | P1 |
+| MF-07 | `env(safe-area-inset-*)` used on fixed/sticky elements for notched devices | P2 |
+| MF-08 | Touch-action CSS set appropriately (no accidental zoom on interactive areas) | P3 |
+
+```bash
+# Verify viewport meta tag
+rg -n 'viewport' apps/*/index.html
+# Check for max-width anti-pattern (should use min-width for mobile-first)
+rg -n 'max-width' apps/*/src --glob '*.css' | grep '@media'
+# Check for 100vh (should be 100dvh)
+rg -n '100vh' apps/*/src --glob '*.css' --glob '*.tsx'
+# Check safe-area-inset usage
+rg -n 'safe-area' apps/*/src --glob '*.css'
+```
+
+### E) Breakpoint Discipline
 
 - Ensure breakpoints align with design tokens.
 - Flag ad-hoc breakpoints that fragment behavior.
-
-CSS specificity diagnostic:
 
 ```bash
 # Find ad-hoc breakpoints not using design tokens
@@ -412,18 +668,21 @@ rg -n '!important' --glob '*.css' --glob '!design-system.css' | head -20
 rg -n 'style={{' --glob '*.tsx' | grep -v 'var(--' | head -20
 ```
 
-### C) Layout Adaptation
+### F) Layout Adaptation
 
 - Grid collapse and content order on small screens.
 - Table-to-card behavior for narrow widths.
 - Modal-to-bottom-sheet adaptation for mobile.
 - Sticky/footer action bars with safe-area handling.
+- Sidebar content area takes full width on mobile when sidebar is hidden.
 
-### D) Overflow and Readability
+### G) Overflow and Readability
 
-- Horizontal scroll risks at narrow widths.
+- Horizontal scroll risks at narrow widths (test at 320px).
 - Missing `min-width: 0` in flex layouts.
 - Long-token handling for IDs/hashes/ARN-like values.
+- Text truncation with `text-overflow: ellipsis` where appropriate.
+- No content cut off at any standard viewport size.
 
 ## Phase 4: Accessibility (WCAG 2.1 AA)
 
@@ -516,6 +775,209 @@ Validate these recently implemented flows:
 - **Forgot Password flow**: Panel must swap in-place (not navigate). Back button must return to login form. Email field must be required. Success message must show after "send". No actual API call is made yet (client-side only) — flag if this is still the case.
 - **Theme selector completeness**: All themes from `CUSTOM_THEMES` must appear in the login theme dropdown. Verify count matches the theme definitions in `design-system.css`.
 
+## Phase 5B: UI State Completeness & Modern Design Patterns
+
+This phase covers universal UI patterns that every production SPA must implement. Missing these patterns results in an unpolished, amateurish user experience.
+
+### A) Empty States
+
+Every data-driven view MUST have an intentional empty state. No blank white screens.
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| ES-01 | Each list/table view has an empty state when no data exists | P1 |
+| ES-02 | Empty state includes: illustration/icon + heading + descriptive text + CTA button | P1 |
+| ES-03 | First-run empty state (new workspace, no documents) is welcoming and guides user | P2 |
+| ES-04 | Search/filter empty state ("No results match your criteria") is distinct from data empty state | P2 |
+| ES-05 | Empty state CTA is actionable (e.g., "Upload your first document" button) | P2 |
+
+```bash
+# Check for empty state handling
+rg -n 'empty|no.*data|no.*results|no.*items|nothing.*found' apps/*/src --glob '*.tsx' -i
+rg -n 'length === 0|\.length === 0' apps/*/src --glob '*.tsx'
+```
+
+### B) Error Pages & Boundaries
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| EP-01 | 404 Not Found page exists for unmatched routes (catch-all route) | P1 |
+| EP-02 | React Error Boundary wraps main content area (prevents full-app crash) | P1 |
+| EP-03 | Error boundary shows: error icon + message + "Try Again" / "Go Home" buttons | P1 |
+| EP-04 | Network error state (API unreachable) shows meaningful feedback, not raw error | P1 |
+| EP-05 | Retry mechanism on transient errors (with exponential backoff if auto-retry) | P2 |
+| EP-06 | Session expired state redirects to login with message | P2 |
+
+```bash
+# Check for error boundary
+rg -n 'ErrorBoundary|componentDidCatch|getDerivedStateFromError' apps/*/src --glob '*.tsx'
+# Check for 404/catch-all route
+rg -n 'path="\*"|path="*"' apps/*/src --glob '*.tsx'
+# Check for network error handling
+rg -n 'catch|onError|isError|error.*state' apps/*/src --glob '*.tsx' | head -20
+```
+
+### C) Loading & Skeleton Patterns
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| LD-01 | Page transitions show loading indicator (Suspense fallback or route-level loader) | P1 |
+| LD-02 | Data-fetching components show skeleton/shimmer during loading (not just spinner) | P2 |
+| LD-03 | Skeleton shape matches content layout (prevents layout shift CLS) | P2 |
+| LD-04 | Loading states use animation (pulse or shimmer) to indicate activity | P3 |
+| LD-05 | Long operations (>3s) show progress bar or step indicator | P2 |
+| LD-06 | Page-level loader for React.lazy routes (Suspense fallback) | P1 |
+| LD-07 | No indefinite spinners — all loading states have timeout with error fallback | P2 |
+
+```bash
+# Check for Suspense/lazy loading
+rg -n 'Suspense|React\.lazy' apps/*/src --glob '*.tsx'
+# Check for skeleton/loading components
+rg -n 'skeleton|Skeleton|shimmer|Shimmer|isLoading|isPending' apps/*/src --glob '*.tsx'
+# Check for loading spinners
+rg -n 'Loader|spinner|Spinner|Loading' apps/*/src --glob '*.tsx'
+```
+
+### D) Toast & Notification Patterns
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| TN-01 | Success/error feedback for mutations (create, update, delete) uses toast or inline message | P1 |
+| TN-02 | Toasts are positioned consistently (top-right or bottom-right) | P2 |
+| TN-03 | Toasts auto-dismiss after timeout (3-5 seconds) with manual dismiss option | P2 |
+| TN-04 | Toasts use semantic colors (green=success, red=error, yellow=warning, blue=info) | P2 |
+| TN-05 | Toast container has `role="status"` or `aria-live="polite"` for screen readers | P1 |
+| TN-06 | No more than 3 toasts visible simultaneously (queue excess) | P3 |
+
+### E) Modal & Dialog Patterns
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| MD-01 | Modals use `<dialog>` element or have `role="dialog"` + `aria-modal="true"` | P1 |
+| MD-02 | Focus trapped inside open modal (Tab cycles within modal) | P1 |
+| MD-03 | Escape key closes modal | P1 |
+| MD-04 | Click outside modal (on backdrop) closes it | P2 |
+| MD-05 | Focus returns to trigger element when modal closes | P1 |
+| MD-06 | Modal has accessible title (`aria-labelledby` pointing to heading) | P1 |
+| MD-07 | Confirmation dialogs for destructive actions have explicit action labels (not just "OK") | P1 |
+| MD-08 | Body scroll locked when modal is open | P2 |
+
+### F) Form Design Patterns
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| FM-01 | All form inputs have visible labels (not just placeholder text) | P1 |
+| FM-02 | Required fields clearly indicated (asterisk or "(required)" text) | P2 |
+| FM-03 | Validation errors appear inline next to the field, not just at top of form | P1 |
+| FM-04 | Validation timing: on blur for first visit, on change after first error | P2 |
+| FM-05 | Submit button disabled or shows loading during submission | P1 |
+| FM-06 | Form-level error summary for complex forms (list of errors at top) | P3 |
+| FM-07 | Appropriate input types (`email`, `url`, `tel`, `number`) for mobile keyboard optimization | P2 |
+| FM-08 | Autocomplete attributes set correctly for autofill support | P2 |
+| FM-09 | Multi-step forms show progress indicator | P3 |
+
+### G) Card & Container Patterns
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| CD-01 | Cards use consistent border-radius from design tokens | P2 |
+| CD-02 | Cards use consistent shadow/elevation from design tokens | P2 |
+| CD-03 | Card padding consistent across views | P2 |
+| CD-04 | Interactive cards have hover state (shadow increase or border change) | P2 |
+| CD-05 | Interactive cards have cursor pointer and focus-visible ring | P1 |
+| CD-06 | Card grids responsive: `grid-cols-1 md:grid-cols-2 lg:grid-cols-3` or `auto-fit` | P1 |
+
+### H) Animation & Motion Guidelines
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| AN-01 | `prefers-reduced-motion` media query respected (disable animations for accessibility) | P1 |
+| AN-02 | Transitions use consistent duration (150-300ms for micro, 300-500ms for page) | P2 |
+| AN-03 | Transitions use appropriate easing (ease-out for enter, ease-in for exit) | P3 |
+| AN-04 | No layout-triggering animations (use `transform` and `opacity`, not `width`/`height`) | P2 |
+| AN-05 | Page transitions smooth (no jarring content jumps) | P2 |
+
+```bash
+# Check for reduced motion support
+rg -n 'prefers-reduced-motion' apps/*/src --glob '*.css' --glob '*.tsx'
+# Check transition durations for consistency
+rg -n 'transition.*duration|duration-' apps/*/src --glob '*.css' --glob '*.tsx' | head -20
+```
+
+### I) Dark Mode Completeness Audit
+
+Every app with a dark mode/theme system MUST pass these checks:
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| DM-01 | All text colors use design tokens (`var(--color-text-*)`) — no hardcoded `#333`, `black`, `gray-900` | P1 |
+| DM-02 | All background colors use design tokens — no hardcoded `white`, `#fff`, `gray-50` | P1 |
+| DM-03 | All border colors use tokens — no hardcoded `gray-200`, `#e5e7eb` | P2 |
+| DM-04 | Shadows adapt for dark mode (lighter shadows or glow instead of drop shadow) | P3 |
+| DM-05 | Form inputs readable in dark mode (proper background + text contrast) | P1 |
+| DM-06 | Images/illustrations don't clash with dark backgrounds (consider `mix-blend-mode` or dark variants) | P2 |
+| DM-07 | Status badges (success/error/warning) visible and readable in both modes | P1 |
+| DM-08 | Scrollbar styling adapts or uses `color-scheme: dark` | P3 |
+| DM-09 | No flash of wrong theme on page load (theme applied before first paint) | P2 |
+| DM-10 | All modal/overlay backdrops render correctly in dark mode | P2 |
+
+```bash
+# Find hardcoded colors that bypass design tokens
+rg -n '#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(' apps/*/src --glob '*.css' --glob '*.tsx' | head -30
+rg -n 'text-black|text-white|bg-white|bg-black|text-gray-[0-9]|bg-gray-[0-9]' apps/*/src --glob '*.tsx' | head -20
+# Verify theme is applied before React renders
+rg -n 'applyStoredTheme|data-theme' apps/*/src --glob '*.tsx' --glob '*.html'
+```
+
+### J) Data Table Patterns
+
+Data tables are a core UI element. Every table-based view MUST follow these patterns:
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| DT-01 | Tables use semantic `<table>`, `<thead>`, `<tbody>`, `<th>`, `<td>` elements | P1 |
+| DT-02 | Column headers have `scope="col"` for screen readers | P1 |
+| DT-03 | Sortable columns have `aria-sort` attribute and visual indicator (arrow icon) | P2 |
+| DT-04 | Tables responsive on mobile: data-dense record tables reflow into stacked cards below breakpoint; horizontal scroll is reserved for true matrix content only | P1 |
+| DT-05 | Table rows have adequate height (min 44px) for touch | P1 |
+| DT-06 | Pagination controls present for large datasets (not rendering 500+ rows) | P2 |
+| DT-07 | Table empty state shown when no rows match (not just empty `<tbody>`) | P1 |
+| DT-08 | Loading state: skeleton rows or spinner overlay during data fetch | P2 |
+| DT-09 | Sticky table header on scroll for long tables | P3 |
+| DT-10 | Row selection/actions use checkboxes (not just click-to-select) | P3 |
+
+### K) Search & Filter UX
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| SF-01 | Search input has debounce (300-500ms) to avoid excessive API calls | P2 |
+| SF-02 | Search input has clear button (×) when non-empty | P2 |
+| SF-03 | "No results" state when search/filter returns empty (not blank screen) | P1 |
+| SF-04 | Active filter count or badges showing applied filters | P2 |
+| SF-05 | "Clear all filters" action available when filters are applied | P2 |
+| SF-06 | Search input has appropriate `type="search"` and `role="searchbox"` | P2 |
+| SF-07 | Filter state persisted in URL params (allows sharing/bookmarking filtered views) | P3 |
+
+### L) Scroll & Content Behavior
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| SC-01 | Long lists virtualized or paginated (not rendering 1000+ DOM nodes) | P2 |
+| SC-02 | Scroll position restored on back navigation | P2 |
+| SC-03 | Sticky headers/toolbars don't overlap scrollable content | P1 |
+| SC-04 | Infinite scroll has "loading more" indicator at bottom | P3 |
+| SC-05 | Page does not have competing scroll containers (nested scroll confusion) | P2 |
+
+### M) Image & Media Handling
+
+| Check | Requirement | Severity |
+|-------|-------------|----------|
+| IM-01 | Images use `loading="lazy"` for below-fold content | P2 |
+| IM-02 | Images have `alt` text (empty `alt=""` for decorative images) | P1 |
+| IM-03 | Image containers have fixed aspect-ratio to prevent layout shift (CLS) | P2 |
+| IM-04 | Broken image fallback (placeholder or error state) | P2 |
+| IM-05 | SVG icons have `aria-hidden="true"` when decorative | P1 |
+
 ## Phase 6: Internationalization and Content Quality
 
 ### A) Citizen App Bilingual Compliance
@@ -584,15 +1046,19 @@ Blocking gates:
 
 1. Accessibility (WCAG 2.1 AA)
 2. Mobile responsiveness
-3. Interaction predictability
-4. Sensitive action safety
-5. System status visibility
-6. Error prevention
-7. Progressive disclosure
-8. State resilience
-9. Graceful degradation/offline handling
-10. UI determinism (same input always produces same visible output)
-11. Behavioral trust (user can predict what an action will do before performing it)
+3. Mobile navigation (collapsible sidebar, hamburger menu, menu icons)
+4. Login screen completeness (full-fledged login with all required features)
+5. Interaction predictability
+6. Sensitive action safety
+7. System status visibility (loading, error, empty states)
+8. Error prevention and recovery
+9. Progressive disclosure
+10. State resilience
+11. Graceful degradation/offline handling
+12. Empty state coverage (no blank screens)
+13. Error boundary coverage (no white-screen crashes)
+14. UI determinism (same input always produces same visible output)
+15. Behavioral trust (user can predict what an action will do before performing it)
 
 Non-blocking gates:
 
@@ -600,6 +1066,8 @@ Non-blocking gates:
 2. Temporal awareness
 3. Input efficiency
 4. UX observability
+5. Animation/motion quality
+6. Dark mode completeness
 
 Release policy:
 
@@ -609,11 +1077,14 @@ Release policy:
 Use verdict block:
 
 ```text
-WCAG Status:        [PASS | PARTIAL | FAIL]
-Mobile Readiness:   [PASS | FAIL]
-Blocking Gates:     X/11 PASS, Y/11 PARTIAL, Z/11 FAIL
-Non-Blocking Gates: X/4 PASS, Y/4 PARTIAL, Z/4 FAIL
-Release Decision:   [GO | NO-GO]
+WCAG Status:            [PASS | PARTIAL | FAIL]
+Mobile Readiness:       [PASS | FAIL]
+Mobile Navigation:      [PASS | PARTIAL | FAIL]
+Login Completeness:     [PASS | PARTIAL | FAIL]
+Empty/Error States:     [PASS | PARTIAL | FAIL]
+Blocking Gates:         X/15 PASS, Y/15 PARTIAL, Z/15 FAIL
+Non-Blocking Gates:     X/6 PASS, Y/6 PARTIAL, Z/6 FAIL
+Release Decision:       [GO | NO-GO]
 ```
 
 ## Phase 9: Bugs and Foot-Guns
@@ -631,6 +1102,17 @@ Release Decision:   [GO | NO-GO]
 | Interactive element < 44px | Add `min-height: 2.75rem` (or `3rem` on mobile for primary actions) |
 | `:hover` without `:active` | Add matching `:active` state (e.g., `opacity: 0.8` or `transform: scale(0.98)`) |
 | Hardcoded `"Yes"/"No"` | Replace with `t("common.yes")/t("common.no")` |
+| Non-collapsible sidebar on mobile | Add hamburger toggle + `translate-x` transform with `md:translate-x-0` |
+| Menu item without icon | Add consistent icon (lucide-react or similar) with `aria-hidden="true"` |
+| Missing hamburger button on mobile | Add `<button aria-label="Open menu" className="md:hidden">` with menu icon |
+| No empty state on list view | Add conditional render when `data.length === 0` with icon + message + CTA |
+| Missing Error Boundary | Wrap route content in `<ErrorBoundary>` component |
+| No 404 page | Add `<Route path="*" element={<NotFoundPage />} />` |
+| Blank screen on data load | Add skeleton/loading component matching content layout |
+| Modal without focus trap | Add `onKeyDown` Tab handler or use `<dialog>` element |
+| Missing `autocomplete` on form inputs | Add `autocomplete="username"` / `autocomplete="current-password"` etc. |
+| No `prefers-reduced-motion` handling | Add `@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }` |
+| Login without theme support | Ensure all login CSS uses `var(--color-*)` tokens, test in dark mode |
 
 Minimum counts:
 
@@ -763,20 +1245,62 @@ rg -n 'unit_id = \$[0-9]+::text' apps/dopams-api/src apps/forensic-api/src apps/
 # Verify auth returns token in body
 rg -n 'token' apps/dopams-api/src/routes/auth.routes.ts apps/forensic-api/src/routes/auth.routes.ts apps/social-media-api/src/routes/auth.routes.ts
 
-# Build checks for UI apps
-npm run build:citizen
-npm run build:officer
-npm run build:dopams-ui
-npm run build:forensic-ui
-npm run build:social-media-ui
+# --- Mobile-First Navigation Checks ---
+
+# Sidebar collapsibility
+rg -n 'translate-x|isOpen|isSidebarOpen|sidebarOpen|menuOpen' apps/*/src --glob '*.tsx'
+# Hamburger button presence
+rg -n 'hamburger|menu-toggle|Menu.*icon|MenuIcon' apps/*/src --glob '*.tsx'
+rg -n 'md:hidden.*button|lg:hidden.*button' apps/*/src --glob '*.tsx'
+# Menu item icons (every NavLink/nav item should have an icon)
+rg -n 'NavLink' apps/*/src --glob '*.tsx' -A 2
+# Sidebar aria attributes
+rg -n 'aria-expanded|aria-label.*nav|aria-label.*menu' apps/*/src --glob '*.tsx'
+# Backdrop/overlay when sidebar open on mobile
+rg -n 'backdrop|overlay|bg-black/50|bg-black.*opacity' apps/*/src --glob '*.tsx'
+
+# --- Login Screen Completeness Checks ---
+
+# Full-fledged login features
+rg -n 'autocomplete=' apps/*/src --glob '*ogin*'
+rg -n 'aria-live|role="alert"' apps/*/src --glob '*ogin*'
+rg -n 'focus-visible' apps/*/src --glob '*ogin*'
+rg -n '<form' apps/*/src --glob '*ogin*'
+rg -n 'disabled.*loading|loading.*disabled' apps/*/src --glob '*ogin*'
+rg -n 'remember|Remember' apps/*/src --glob '*ogin*'
+rg -n 'forgot|Forgot' apps/*/src --glob '*ogin*'
+rg -n 'showPassword|togglePassword|eye' apps/*/src --glob '*ogin*'
+rg -n '100dvh' apps/*/src --glob '*ogin*'
+
+# --- Empty State & Error Boundary Checks ---
+
+# Empty states
+rg -n 'empty|no.*data|no.*results|nothing.*here' apps/*/src --glob '*.tsx' -i | head -20
+rg -n 'length === 0|\.length === 0' apps/*/src --glob '*.tsx' | head -20
+# Error boundary
+rg -n 'ErrorBoundary|componentDidCatch|getDerivedStateFromError' apps/*/src --glob '*.tsx'
+# 404 catch-all
+rg -n 'path="\*"' apps/*/src --glob '*.tsx'
+# Loading/skeleton
+rg -n 'Skeleton|skeleton|shimmer|isLoading|isPending' apps/*/src --glob '*.tsx' | head -20
+rg -n 'Suspense|React\.lazy' apps/*/src --glob '*.tsx'
+
+# --- Accessibility & Motion Checks ---
+
+# prefers-reduced-motion
+rg -n 'prefers-reduced-motion' apps/*/src --glob '*.css' --glob '*.tsx'
+# Focus trap in modals
+rg -n 'dialog|Dialog|modal|Modal' apps/*/src --glob '*.tsx' -l
+rg -n 'aria-modal|role="dialog"' apps/*/src --glob '*.tsx'
+# Viewport meta tag
+rg -n 'viewport' apps/*/index.html
+
+# Build checks for UI apps (run whichever apps are present)
+npm run build:web 2>&1 | tail -20
+npm run build:all 2>&1 | tail -20
 
 # Repo-level checks helpful for UI quality
-npm run check:frontend-budgets
-npm run test:e2e:a11y
-npm run test:e2e:resilience
-
-# Optional broader checks
-npm run build:all
+npm run test:e2e 2>&1 | tail -20
 ```
 
 If a command fails, include failure summary and likely root cause.
@@ -786,13 +1310,20 @@ If a command fails, include failure summary and likely root cause.
 Ensure the final review document contains these sections in order:
 
 1. Scope and Preflight
-2. UI Inventory
-3. Category Findings
-4. QA Gates and Verdict
-5. Bugs and Foot-Guns
-6. BRD UI Compliance Matrix
-7. UI Architect Backlog
-8. Quick Wins and Stabilization
-9. Top 5 Priorities
+2. UI Inventory (routes, components, CSS, navigation, empty/error/loading coverage)
+3. Login Screen Completeness Audit (scored against §2B checklist)
+4. Mobile Navigation Audit (scored against Phase 3 §A-§B checklists)
+5. Design System Findings
+6. Responsive & Mobile-First Findings
+7. Accessibility Findings
+8. Interaction & State Findings
+9. Empty State / Error Boundary / Loading Pattern Findings
+10. Modern UI Pattern Findings (toasts, modals, forms, cards, animation)
+11. QA Gates and Verdict (15 blocking + 6 non-blocking)
+12. Bugs and Foot-Guns
+13. BRD UI Compliance Matrix (if BRD exists)
+14. UI Architect Backlog
+15. Quick Wins and Stabilization
+16. Top 5 Priorities
 
 If `docs/reviews/` does not exist, create it before writing the report.

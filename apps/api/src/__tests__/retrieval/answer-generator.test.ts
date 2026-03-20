@@ -14,6 +14,7 @@ function createMockLlmProvider() {
     testProvider: vi.fn(),
     getSystemPrompt: vi.fn(),
     invalidateProviderCache: vi.fn(),
+    getModelForPreset: vi.fn().mockReturnValue(undefined),
   };
 }
 
@@ -234,7 +235,7 @@ describe("generateAnswer", () => {
       // Verify the message content includes chunk metadata
       const callArgs = llmProvider.llmComplete.mock.calls[0][0];
       const userMessage = callArgs.messages.find((m: { role: string }) => m.role === "user");
-      expect(userMessage.content).toContain("[1] Policy Manual (page 7):");
+      expect(userMessage.content).toContain("[1] [Source: Policy Manual, Page 7]:");
       expect(userMessage.content).toContain("All employees must complete training.");
     });
 
@@ -261,8 +262,133 @@ describe("generateAnswer", () => {
 
       const callArgs = llmProvider.llmComplete.mock.calls[0][0];
       const userMessage = callArgs.messages.find((m: { role: string }) => m.role === "user");
-      expect(userMessage.content).toContain("[1] Reference Doc:");
+      expect(userMessage.content).toContain("[1] [Source: Reference Doc]:");
       expect(userMessage.content).not.toContain("(page");
+    });
+
+    it("includes scope metadata when present on chunks", async () => {
+      const llmProvider = createMockLlmProvider();
+      llmProvider.llmComplete.mockResolvedValueOnce({
+        content: "Answer [1].",
+        provider: "openai",
+        model: "gpt-4o",
+        latencyMs: 100,
+        fallbackUsed: false,
+      });
+
+      await generateAnswer(
+        llmProvider,
+        "Who are the witnesses?",
+        [makeRankedChunk({
+          document_title: "Witness List",
+          case_reference: "424/2021",
+          fir_number: "FIR-9",
+          scope_status: "MATCH",
+        })],
+        "",
+        [],
+        "balanced",
+        undefined,
+        [{ name: "424/2021", type: "case_ref" }],
+      );
+
+      const callArgs = llmProvider.llmComplete.mock.calls[0][0];
+      const userMessage = callArgs.messages.find((m: { role: string }) => m.role === "user");
+      expect(userMessage.content).toContain("[1] [Source: Witness List, Page 12, Case 424/2021, FIR FIR-9, Scope match]:");
+      expect(callArgs.messages[0].content).toContain('Prefer chunks labeled "Scope match"');
+    });
+
+    it("treats multi-case comparison questions as scoped comparisons", async () => {
+      const llmProvider = createMockLlmProvider();
+      llmProvider.llmComplete.mockResolvedValueOnce({
+        content: "Answer [1][2].",
+        provider: "openai",
+        model: "gpt-4o",
+        latencyMs: 100,
+        fallbackUsed: false,
+      });
+
+      await generateAnswer(
+        llmProvider,
+        "What are the key differences between case 424 and 773?",
+        [
+          makeRankedChunk({
+            chunk_id: "c1",
+            document_title: "CHARGE SHEET 424 OF 2021",
+            case_reference: "424/2021",
+            scope_status: "MATCH",
+          }),
+          makeRankedChunk({
+            chunk_id: "c2",
+            document_title: "CS 773 Final Modified",
+            case_reference: "773/2022",
+            scope_status: "MATCH",
+          }),
+        ],
+        "",
+        [],
+        "balanced",
+        undefined,
+        [
+          { name: "424", type: "case_ref" },
+          { name: "773", type: "case_ref" },
+          { name: "111/2020", type: "case_ref" },
+        ],
+        {
+          requestedCaseScopes: ["424", "773"],
+          matchedCaseScopes: ["424/2021", "773/2022"],
+          scopeMode: "multi",
+          scopeSource: "explicit_multi",
+        },
+      );
+
+      const callArgs = llmProvider.llmComplete.mock.calls[0][0];
+      expect(callArgs.messages[0].content).toContain("Requested cases for this turn: 424, 773");
+      expect(callArgs.messages[0].content).toContain("comparison question");
+      expect(callArgs.messages[0].content).toContain("If evidence is available for only one requested case");
+      expect(callArgs.messages[0].content).not.toContain("111/2020");
+      const userMessage = callArgs.messages.find((m: { role: string }) => m.role === "user");
+      expect(userMessage.content).toContain("Case 424 Evidence:");
+      expect(userMessage.content).toContain("Case 773 Evidence:");
+    });
+
+    it("flags missing requested cases in scoped comparison prompts", async () => {
+      const llmProvider = createMockLlmProvider();
+      llmProvider.llmComplete.mockResolvedValueOnce({
+        content: "Answer [1].",
+        provider: "openai",
+        model: "gpt-4o",
+        latencyMs: 100,
+        fallbackUsed: false,
+      });
+
+      await generateAnswer(
+        llmProvider,
+        "Compare case 424 and 773",
+        [
+          makeRankedChunk({
+            chunk_id: "c1",
+            document_title: "CHARGE SHEET 424 OF 2021",
+            case_reference: "424/2021",
+            scope_status: "MATCH",
+            matched_case_scopes: ["424/2021"],
+          }),
+        ],
+        "",
+        [],
+        "balanced",
+        undefined,
+        [{ name: "424", type: "case_ref" }],
+        {
+          requestedCaseScopes: ["424", "773"],
+          matchedCaseScopes: ["424/2021"],
+          scopeMode: "multi",
+          scopeSource: "explicit_multi",
+        },
+      );
+
+      const callArgs = llmProvider.llmComplete.mock.calls[0][0];
+      expect(callArgs.messages[0].content).toContain("missing a confident case match for: 773");
     });
 
     it("includes graph context when provided", async () => {
@@ -349,7 +475,7 @@ describe("generateAnswer", () => {
 
       const callArgs = llmProvider.llmComplete.mock.calls[0][0];
       expect(callArgs.useCase).toBe("ANSWER_GENERATION");
-      expect(callArgs.maxTokens).toBe(2048);
+      expect(callArgs.maxTokens).toBe(1024);
       expect(callArgs.temperature).toBe(0.2);
     });
   });

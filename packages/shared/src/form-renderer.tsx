@@ -26,6 +26,14 @@ export interface CitizenProperty {
   district: string | null;
 }
 
+type ValidationConfig = Record<string, unknown>;
+type FormFieldValue = string | number | boolean | null | undefined;
+type FormDataEntry = FormFieldValue | FormDataState;
+
+export interface FormDataState {
+  [key: string]: FormDataEntry;
+}
+
 export interface FieldDef {
   key: string;
   label: string;
@@ -39,9 +47,9 @@ export interface FieldDef {
     widget?: string;
     options?: { value: string; label: string }[];
     readOnly?: boolean;
-    fillFromProperty?: string;
+    fillFromProperty?: keyof CitizenProperty;
   };
-  validations?: any[];
+  validations?: ValidationConfig[];
 }
 
 export interface FormSection {
@@ -68,9 +76,9 @@ export interface FormConfig {
 
 interface FormRendererProps {
   config: FormConfig;
-  initialData?: any;
-  onChange?: (data: any) => void;
-  onSubmit?: (data: any) => void;
+  initialData?: FormDataState;
+  onChange?: (data: FormDataState) => void;
+  onSubmit?: (data: FormDataState) => void;
   readOnly?: boolean;
   unlockedFields?: string[];
   /** Citizen-owned properties for UPN picker auto-population */
@@ -120,7 +128,7 @@ export function FormRenderer({
   secondaryLanguage,
   appendSteps = [],
 }: FormRendererProps) {
-  const [data, setData] = useState<any>(initialData);
+  const [data, setData] = useState<FormDataState>(initialData);
   const [currentPage, setCurrentPage] = useState(0);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
@@ -155,11 +163,14 @@ export function FormRenderer({
   };
 
   // Helper: read a nested dot-key from form data
-  const getFieldValue = useCallback((key: string): any => {
+  const getFieldValue = useCallback((key: string): FormDataEntry => {
     const keys = key.split(".");
-    let value = data;
+    let value: FormDataEntry = data;
     for (const k of keys) {
-      value = value?.[k];
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+      }
+      value = value[k];
       if (value === undefined) return undefined;
     }
     return value;
@@ -177,11 +188,11 @@ export function FormRenderer({
   }, []);
 
   // Helper: validate a single field value
-  const validateField = useCallback((field: FieldDef, value: any): string | null => {
+  const validateField = useCallback((field: FieldDef, value: FormDataEntry): string | null => {
     if (field.required && (value === undefined || value === null || value === "")) {
       return `${field.label} is required`;
     }
-    if (value) {
+    if (typeof value === "string" || typeof value === "number") {
       const vType = inferValidationType(field);
       if (vType) {
         const errKey = runValidation(String(value), vType);
@@ -192,13 +203,16 @@ export function FormRenderer({
   }, [inferValidationType]);
 
   // Helper: write a nested dot-key into form data
-  const updateField = useCallback((key: string, value: any) => {
+  const updateField = useCallback((key: string, value: FormFieldValue) => {
     const newData = { ...data };
     const keys = key.split(".");
-    let current = newData;
+    let current: FormDataState = newData;
     for (let i = 0; i < keys.length - 1; i++) {
-      if (!current[keys[i]]) current[keys[i]] = {};
-      current = current[keys[i]];
+      const existing = current[keys[i]];
+      if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
+        current[keys[i]] = {};
+      }
+      current = current[keys[i]] as FormDataState;
     }
     current[keys[keys.length - 1]] = value;
     setData(newData);
@@ -207,6 +221,11 @@ export function FormRenderer({
       setErrors((prev) => ({ ...prev, [key]: "" }));
     }
   }, [data, errors, onChange]);
+
+  const toInputValue = useCallback((value: FormDataEntry): string | number => {
+    if (typeof value === "string" || typeof value === "number") return value;
+    return "";
+  }, []);
 
   const handleBlur = useCallback((field: FieldDef) => {
     setTouched((prev) => ({ ...prev, [field.key]: true }));
@@ -239,12 +258,15 @@ export function FormRenderer({
     );
 
     const newData = { ...data };
-    const setNested = (key: string, value: any) => {
+    const setNested = (key: string, value: FormFieldValue) => {
       const parts = key.split(".");
-      let obj = newData;
+      let obj: FormDataState = newData;
       for (let i = 0; i < parts.length - 1; i++) {
-        if (!obj[parts[i]]) obj[parts[i]] = {};
-        obj = obj[parts[i]];
+        const existing = obj[parts[i]];
+        if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
+          obj[parts[i]] = {};
+        }
+        obj = obj[parts[i]] as FormDataState;
       }
       obj[parts[parts.length - 1]] = value;
     };
@@ -257,7 +279,7 @@ export function FormRenderer({
           for (const f of section.fields) {
             const fillKey = f.ui?.fillFromProperty;
             if (!fillKey) continue;
-            const propValue = (property as any)[fillKey];
+            const propValue = property[fillKey];
             if (propValue !== undefined && propValue !== null) {
               setNested(f.key, propValue);
             }
@@ -290,12 +312,15 @@ export function FormRenderer({
       });
       // Auto-fill form fields via the same handleUpnSelect logic but using the looked-up property
       const newData = { ...data };
-      const setNested = (key: string, value: any) => {
+      const setNested = (key: string, value: FormFieldValue) => {
         const parts = key.split(".");
-        let obj = newData;
+        let obj: FormDataState = newData;
         for (let i = 0; i < parts.length - 1; i++) {
-          if (!obj[parts[i]]) obj[parts[i]] = {};
-          obj = obj[parts[i]];
+          const existing = obj[parts[i]];
+          if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
+            obj[parts[i]] = {};
+          }
+          obj = obj[parts[i]] as FormDataState;
         }
         obj[parts[parts.length - 1]] = value;
       };
@@ -306,7 +331,7 @@ export function FormRenderer({
             for (const f of section.fields) {
               const fillKey = f.ui?.fillFromProperty;
               if (!fillKey) continue;
-              const propValue = (property as any)[fillKey];
+              const propValue = property[fillKey];
               if (propValue !== undefined && propValue !== null) {
                 setNested(f.key, propValue);
               }
@@ -361,6 +386,7 @@ export function FormRenderer({
 
   const renderField = (field: FieldDef) => {
     const value = getFieldValue(field.key);
+    const inputValue = toInputValue(value);
     const editable = isFieldEditable(field);
     const error = errors[field.key];
 
@@ -375,7 +401,8 @@ export function FormRenderer({
       case "textarea":
         if (field.type === "string" && field.ui?.widget === "upn-picker") {
           const knownProps = allProperties.filter((p) => p.unique_property_number && p.scheme_name);
-          const selectedProp = allProperties.find((x) => x.unique_property_number === value);
+          const selectedUpn = typeof value === "string" ? value : "";
+          const selectedProp = allProperties.find((x) => x.unique_property_number === selectedUpn);
           const showDropdown = knownProps.length > 0 && !upnManualMode;
           const showManualInput = knownProps.length === 0 || upnManualMode;
           return (
@@ -388,7 +415,7 @@ export function FormRenderer({
                 <>
                   <select
                     {...ariaProps}
-                    value={value || ""}
+                    value={selectedUpn}
                     onChange={(e) => {
                       if (e.target.value) {
                         handleUpnSelect(e.target.value);
@@ -437,7 +464,7 @@ export function FormRenderer({
                     <input
                       {...ariaProps}
                       type="text"
-                      value={value || ""}
+                      value={selectedUpn}
                       onChange={(e) => {
                         updateField(field.key, e.target.value);
                         if (upnLookupError) setUpnLookupError(null);
@@ -446,7 +473,7 @@ export function FormRenderer({
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           e.preventDefault();
-                          if (value && !selectedProp) handleUpnLookup(value);
+                          if (selectedUpn && !selectedProp) handleUpnLookup(selectedUpn);
                         }
                       }}
                       placeholder="e.g. PB-140-001-003-002301"
@@ -457,8 +484,8 @@ export function FormRenderer({
                       <button
                         type="button"
                         className="upn-fetch-btn"
-                        disabled={!editable || !value || upnLookupLoading}
-                        onClick={() => value && handleUpnLookup(value)}
+                        disabled={!editable || !selectedUpn || upnLookupLoading}
+                        onClick={() => selectedUpn && handleUpnLookup(selectedUpn)}
                       >
                         {upnLookupLoading ? "Fetching..." : "Fetch Details"}
                       </button>
@@ -497,7 +524,7 @@ export function FormRenderer({
                 </label>
                 <select
                   {...ariaProps}
-                  value={value || ""}
+                  value={inputValue}
                   onChange={(e) => updateField(field.key, e.target.value)}
                   onBlur={blurHandler}
                   disabled={!editable}
@@ -522,7 +549,7 @@ export function FormRenderer({
             {(field.type === "text" || field.type === "textarea") ? (
               <textarea
                 {...ariaProps}
-                value={value || ""}
+                value={inputValue}
                 onChange={(e) => updateField(field.key, e.target.value)}
                 onBlur={blurHandler}
                 placeholder={field.placeholder}
@@ -533,7 +560,7 @@ export function FormRenderer({
               <input
                 {...ariaProps}
                 type="text"
-                value={value || ""}
+                value={inputValue}
                 onChange={(e) => updateField(field.key, e.target.value)}
                 onBlur={blurHandler}
                 placeholder={field.placeholder || (field.ui?.widget === "upn-picker" ? "e.g. PB-140-001-003-002301" : undefined)}
@@ -556,7 +583,7 @@ export function FormRenderer({
               {...ariaProps}
               type="number"
               inputMode="decimal"
-              value={value ?? ""}
+              value={inputValue}
               onChange={(e) => {
                 if (e.target.value === "") {
                   updateField(field.key, undefined);
@@ -583,7 +610,7 @@ export function FormRenderer({
             <input
               {...ariaProps}
               type="date"
-              value={value || ""}
+              value={inputValue}
               onChange={(e) => updateField(field.key, e.target.value)}
               onBlur={blurHandler}
               placeholder={field.placeholder}
@@ -604,7 +631,7 @@ export function FormRenderer({
             <input
               {...ariaProps}
               type="email"
-              value={value || ""}
+              value={inputValue}
               onChange={(e) => updateField(field.key, e.target.value)}
               onBlur={blurHandler}
               placeholder={field.placeholder}
@@ -628,7 +655,7 @@ export function FormRenderer({
                 {...ariaProps}
                 type="tel"
                 inputMode="numeric"
-                value={value || ""}
+                value={inputValue}
                 onChange={(e) => updateField(field.key, e.target.value.replace(/\D/g, "").slice(0, 10))}
                 onBlur={blurHandler}
                 placeholder={field.placeholder || "10-digit mobile"}
@@ -653,7 +680,7 @@ export function FormRenderer({
               type="text"
               inputMode="numeric"
               pattern="\\d{12}"
-              value={value || ""}
+              value={inputValue}
               onChange={(e) => updateField(field.key, e.target.value)}
               onBlur={blurHandler}
               placeholder={field.placeholder}
@@ -670,7 +697,7 @@ export function FormRenderer({
             <label>
               <input
                 type="checkbox"
-                checked={value || false}
+                checked={value === true}
                 onChange={(e) => updateField(field.key, e.target.checked)}
                 onBlur={blurHandler}
                 disabled={!editable}
@@ -692,7 +719,7 @@ export function FormRenderer({
             </label>
             <select
               {...ariaProps}
-              value={value || ""}
+              value={inputValue}
               onChange={(e) => updateField(field.key, e.target.value)}
               onBlur={blurHandler}
               disabled={!editable}

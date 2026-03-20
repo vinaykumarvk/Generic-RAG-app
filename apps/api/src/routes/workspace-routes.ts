@@ -3,8 +3,9 @@
  */
 
 import { FastifyInstance } from "fastify";
-import { send400, send404 } from "@puda/api-core";
+import { send400, send404, sendError, logError } from "@puda/api-core";
 import type { QueryFn, GetClientFn, LlmProvider } from "@puda/api-core";
+import { UpdateWorkspaceSchema } from "@puda/shared";
 
 export interface WorkspaceRouteDeps {
   queryFn: QueryFn;
@@ -86,34 +87,41 @@ export function createWorkspaceRoutes(app: FastifyInstance, deps: WorkspaceRoute
   // Update workspace
   app.patch<{ Params: { wid: string } }>("/api/v1/workspaces/:wid", async (request, reply) => {
     const { wid } = request.params;
-    const { name, description, settings, status } = request.body as {
-      name?: string; description?: string; settings?: Record<string, unknown>; status?: string;
-    };
 
-    const fields: string[] = [];
-    const values: unknown[] = [];
-    let idx = 1;
-
-    if (name !== undefined) { fields.push(`name = $${idx++}`); values.push(name); }
-    if (description !== undefined) { fields.push(`description = $${idx++}`); values.push(description); }
-    if (settings !== undefined) { fields.push(`settings = settings || $${idx++}::jsonb`); values.push(JSON.stringify(settings)); }
-    if (status !== undefined) {
-      const allowedStatuses = ["ACTIVE", "ARCHIVED", "SUSPENDED"];
-      if (!allowedStatuses.includes(status)) return send400(reply, `Invalid status. Must be one of: ${allowedStatuses.join(", ")}`);
-      fields.push(`status = $${idx++}`); values.push(status);
+    const parsed = UpdateWorkspaceSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return send400(reply, parsed.error.issues.map((i) => i.message).join("; "));
     }
+    const { name, description, settings, status } = parsed.data;
 
-    if (fields.length === 0) return send400(reply, "No fields to update");
+    try {
+      const fields: string[] = [];
+      const values: unknown[] = [];
+      let idx = 1;
 
-    fields.push(`updated_at = now()`);
-    values.push(wid);
+      if (name !== undefined) { fields.push(`name = $${idx++}`); values.push(name); }
+      if (description !== undefined) { fields.push(`description = $${idx++}`); values.push(description); }
+      if (settings !== undefined) {
+        fields.push(`settings = COALESCE(settings, '{}'::jsonb) || $${idx++}::jsonb`);
+        values.push(JSON.stringify(settings));
+      }
+      if (status !== undefined) { fields.push(`status = $${idx++}`); values.push(status); }
 
-    const result = await queryFn(
-      `UPDATE workspace SET ${fields.join(", ")} WHERE workspace_id = $${idx} RETURNING *`,
-      values
-    );
-    if (result.rows.length === 0) return send404(reply, "Workspace not found");
-    return result.rows[0];
+      if (fields.length === 0) return send400(reply, "No fields to update");
+
+      fields.push(`updated_at = now()`);
+      values.push(wid);
+
+      const result = await queryFn(
+        `UPDATE workspace SET ${fields.join(", ")} WHERE workspace_id = $${idx} RETURNING *`,
+        values
+      );
+      if (result.rows.length === 0) return send404(reply, "Workspace not found");
+      return result.rows[0];
+    } catch (err) {
+      logError("Failed to update workspace", { workspaceId: wid, error: String(err) });
+      return sendError(reply, 500, "UPDATE_FAILED", "Failed to update workspace");
+    }
   });
 
   // Delete workspace (soft — sets status to ARCHIVED)

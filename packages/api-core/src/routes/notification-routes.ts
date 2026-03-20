@@ -50,8 +50,12 @@ export function createNotificationRoutes(deps: NotificationRouteDeps) {
            ORDER BY created_at DESC LIMIT $3 OFFSET $4`,
           [userId, unreadOnly ? true : null, limit, offset],
         );
-        const total = result.rows.length > 0 ? parseInt(result.rows[0].total_count, 10) : 0;
-        return { notifications: result.rows.map(({ total_count, ...r }: any) => r), total };
+        const rows = result.rows as Array<Record<string, unknown> & { total_count?: string }>;
+        const total = rows.length > 0 ? parseInt(rows[0].total_count || "0", 10) : 0;
+        return {
+          notifications: rows.map(({ total_count, ...notification }) => notification),
+          total,
+        };
       } catch (err: unknown) {
         request.log.error(err, "Failed to list notifications");
         return sendError(reply, 500, "INTERNAL_ERROR", "An internal error occurred");
