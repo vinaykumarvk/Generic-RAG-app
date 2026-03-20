@@ -17,11 +17,15 @@ API_JWT_SECRET="${API_JWT_SECRET:-police-cases-kb-jwt-secret:latest}"
 WEB_API_UPSTREAM="${WEB_API_UPSTREAM:-https://police-cases-kb-api-809677427844.asia-southeast1.run.app}"
 WORKER_DATABASE_SECRET="${WORKER_DATABASE_SECRET:-$API_DATABASE_SECRET}"
 WORKER_OPENAI_API_KEY_SECRET="${WORKER_OPENAI_API_KEY_SECRET:-openai-api-key:latest}"
+WORKER_GEMINI_API_KEY_SECRET="${WORKER_GEMINI_API_KEY_SECRET:-gemini-api-key:latest}"
 WORKER_DOCUMENT_AI_SECRET="${WORKER_DOCUMENT_AI_SECRET:-police-cases-kb-document-ai-credentials:latest}"
 WORKER_DOCUMENT_AI_PROJECT_ID="${WORKER_DOCUMENT_AI_PROJECT_ID:-wealth-report}"
 WORKER_DOCUMENT_AI_LOCATION="${WORKER_DOCUMENT_AI_LOCATION:-eu}"
 WORKER_DOCUMENT_AI_PROCESSOR_ID="${WORKER_DOCUMENT_AI_PROCESSOR_ID:-70b690b94894b43}"
 WORKER_DOCUMENT_AI_CREDENTIALS_PATH="${WORKER_DOCUMENT_AI_CREDENTIALS_PATH:-/var/secrets/document-ai/wealth-report-sa.json}"
+WORKER_GEMINI_MODEL="${WORKER_GEMINI_MODEL:-gemini-2.5-flash}"
+WORKER_KG_LLM_PROVIDER="${WORKER_KG_LLM_PROVIDER:-}"
+WORKER_KG_MODEL_ID="${WORKER_KG_MODEL_ID:-}"
 UPLOADS_BUCKET="${UPLOADS_BUCKET:-police-cases-kb-uploads-${PROJECT_NUMBER}}"
 
 API_IMAGE="asia-southeast1-docker.pkg.dev/${PROJECT}/${REPO}/${API_SERVICE}:latest"
@@ -33,6 +37,23 @@ cd "$(dirname "$0")/.."
 step() { printf '\n=== %s ===\n' "$1"; }
 ok() { printf 'OK: %s\n' "$1"; }
 warn() { printf 'WARN: %s\n' "$1"; }
+
+join_by_comma() {
+  local IFS=,
+  echo "$*"
+}
+
+if [ -z "$WORKER_KG_LLM_PROVIDER" ]; then
+  if [ -n "$WORKER_GEMINI_API_KEY_SECRET" ]; then
+    WORKER_KG_LLM_PROVIDER="gemini"
+  else
+    WORKER_KG_LLM_PROVIDER="openai"
+  fi
+fi
+
+if [ -z "$WORKER_KG_MODEL_ID" ] && [ "$WORKER_KG_LLM_PROVIDER" = "gemini" ]; then
+  WORKER_KG_MODEL_ID="$WORKER_GEMINI_MODEL"
+fi
 
 service_exists() {
   local service="$1"
@@ -129,9 +150,15 @@ ensure_uploads_bucket
 require_secret "${WORKER_DATABASE_SECRET%%:*}"
 require_secret "${WORKER_OPENAI_API_KEY_SECRET%%:*}"
 require_secret "${WORKER_DOCUMENT_AI_SECRET%%:*}"
+if [ -n "$WORKER_GEMINI_API_KEY_SECRET" ]; then
+  require_secret "${WORKER_GEMINI_API_KEY_SECRET%%:*}"
+fi
 ensure_secret_accessor "${WORKER_DATABASE_SECRET%%:*}"
 ensure_secret_accessor "${WORKER_OPENAI_API_KEY_SECRET%%:*}"
 ensure_secret_accessor "${WORKER_DOCUMENT_AI_SECRET%%:*}"
+if [ -n "$WORKER_GEMINI_API_KEY_SECRET" ]; then
+  ensure_secret_accessor "${WORKER_GEMINI_API_KEY_SECRET%%:*}"
+fi
 ok "Required worker secrets are present"
 
 step "Building API image"
@@ -190,6 +217,30 @@ if ! service_has_upload_volume "$WORKER_SERVICE"; then
   )
 fi
 
+worker_env_vars=(
+  "STORAGE_BASE_DIR=./uploads"
+  "DOCUMENT_AI_PROJECT_ID=${WORKER_DOCUMENT_AI_PROJECT_ID}"
+  "DOCUMENT_AI_LOCATION=${WORKER_DOCUMENT_AI_LOCATION}"
+  "DOCUMENT_AI_PROCESSOR_ID=${WORKER_DOCUMENT_AI_PROCESSOR_ID}"
+  "DOCUMENT_AI_CREDENTIALS_PATH=${WORKER_DOCUMENT_AI_CREDENTIALS_PATH}"
+  "KG_LLM_PROVIDER=${WORKER_KG_LLM_PROVIDER}"
+)
+if [ "$WORKER_KG_LLM_PROVIDER" = "gemini" ]; then
+  worker_env_vars+=(
+    "GEMINI_MODEL=${WORKER_GEMINI_MODEL}"
+    "KG_MODEL_ID=${WORKER_KG_MODEL_ID}"
+  )
+fi
+
+worker_secret_vars=(
+  "DATABASE_URL=${WORKER_DATABASE_SECRET}"
+  "OPEN_AI_API_KEY=${WORKER_OPENAI_API_KEY_SECRET}"
+  "${WORKER_DOCUMENT_AI_CREDENTIALS_PATH}=${WORKER_DOCUMENT_AI_SECRET}"
+)
+if [ -n "$WORKER_GEMINI_API_KEY_SECRET" ]; then
+  worker_secret_vars+=("GEMINI_API_KEY=${WORKER_GEMINI_API_KEY_SECRET}")
+fi
+
 gcloud run deploy "$WORKER_SERVICE" \
   --project "$PROJECT" \
   --region "$REGION" \
@@ -206,8 +257,8 @@ gcloud run deploy "$WORKER_SERVICE" \
   --max-instances 1 \
   --no-cpu-throttling \
   --add-cloudsql-instances "$WORKER_CLOUDSQL_INSTANCES" \
-  --set-env-vars "STORAGE_BASE_DIR=./uploads,DOCUMENT_AI_PROJECT_ID=${WORKER_DOCUMENT_AI_PROJECT_ID},DOCUMENT_AI_LOCATION=${WORKER_DOCUMENT_AI_LOCATION},DOCUMENT_AI_PROCESSOR_ID=${WORKER_DOCUMENT_AI_PROCESSOR_ID},DOCUMENT_AI_CREDENTIALS_PATH=${WORKER_DOCUMENT_AI_CREDENTIALS_PATH}" \
-  --set-secrets "DATABASE_URL=${WORKER_DATABASE_SECRET},OPEN_AI_API_KEY=${WORKER_OPENAI_API_KEY_SECRET},${WORKER_DOCUMENT_AI_CREDENTIALS_PATH}=${WORKER_DOCUMENT_AI_SECRET}" \
+  --set-env-vars "$(join_by_comma "${worker_env_vars[@]}")" \
+  --set-secrets "$(join_by_comma "${worker_secret_vars[@]}")" \
   "${worker_volume_args[@]+"${worker_volume_args[@]}"}" \
   --quiet
 WORKER_URL="$(get_service_url "$WORKER_SERVICE")"
