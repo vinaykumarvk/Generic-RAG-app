@@ -189,6 +189,7 @@ export function DocumentDetailPage() {
     CONVERTING: "badge-warning",
     METADATA_EXTRACTING: "badge-warning",
     CHUNKING: "badge-warning",
+    CHUNKED: "badge-warning",
     EMBEDDING: "badge-warning",
     KG_EXTRACTING: "badge-warning",
     REPROCESSING: "badge-warning",

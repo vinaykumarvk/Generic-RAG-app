@@ -6,6 +6,7 @@ import threading
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from .job_poller import run_poller
+from .config import config
 from .db import get_pool
 
 logging.basicConfig(
@@ -23,10 +24,16 @@ shutdown_event = threading.Event()
 @app.on_event("startup")
 async def startup():
     logger.info("Starting IntelliRAG worker...")
-    # Start poller in background thread
-    thread = threading.Thread(target=run_poller, daemon=True)
-    thread.start()
-    logger.info("Job poller thread started")
+    for index in range(config.POLLER_THREADS):
+        thread_name = f"job-poller-{index + 1}"
+        thread = threading.Thread(
+            target=run_poller,
+            kwargs={"worker_name": thread_name},
+            daemon=True,
+            name=thread_name,
+        )
+        thread.start()
+    logger.info("Job poller threads started: count=%s", config.POLLER_THREADS)
 
     # Register graceful shutdown handlers
     def handle_signal(signum, frame):

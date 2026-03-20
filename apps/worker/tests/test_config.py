@@ -29,6 +29,17 @@ class ConfigTests(unittest.TestCase):
 
         importlib.reload(config_module)
 
+    def test_worker_poller_threads_is_clamped_to_at_least_one(self):
+        config_module = importlib.import_module("src.config")
+
+        with patch.dict(os.environ, {"WORKER_POLLER_THREADS": "0"}, clear=False):
+            config_module = importlib.reload(config_module)
+
+            self.assertEqual(config_module.config.POLLER_THREADS, 1)
+            self.assertGreaterEqual(config_module.config.DB_POOL_MAXCONN, 5)
+
+        importlib.reload(config_module)
+
 
 if __name__ == "__main__":
     unittest.main()

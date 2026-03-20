@@ -26,16 +26,22 @@ STEP_HANDLERS = {
     "KG_EXTRACT": extract_kg,
 }
 
-# State transition map: step → (next_step, doc_status_after_step, doc_status_during_next)
-# FR-007: METADATA_EXTRACT inserted after NORMALIZE/CONVERT
+# State transition map: step -> (next_step, doc_status_while_processing, doc_status_after_completion)
 STEP_TRANSITIONS = {
     "VALIDATE": ("NORMALIZE", "VALIDATING", "NORMALIZING"),
     "NORMALIZE": ("CONVERT", "NORMALIZING", "CONVERTING"),
     "CONVERT": ("METADATA_EXTRACT", "CONVERTING", "METADATA_EXTRACTING"),
     "METADATA_EXTRACT": ("CHUNK", "METADATA_EXTRACTING", "CHUNKING"),
-    "CHUNK": ("EMBED", "CHUNKING", "EMBEDDING"),
+    "CHUNK": ("EMBED", "CHUNKING", "CHUNKED"),
     "EMBED": (None, "EMBEDDING", "SEARCHABLE"),
+    "KG_EXTRACT": (None, "KG_EXTRACTING", "ACTIVE"),
 }
+
+
+def _kg_extraction_enabled(cur) -> bool:
+    cur.execute("SELECT enabled FROM feature_flag WHERE name = 'kg_extraction'")
+    flag = cur.fetchone()
+    return bool(flag and flag["enabled"])
 
 
 def poll_once():
@@ -107,11 +113,11 @@ def poll_once():
                 transition = STEP_TRANSITIONS.get(step)
                 if transition:
                     next_step = transition[0]
-                    next_doc_status = transition[2]
+                    completion_doc_status = transition[2]
 
-                    # Update document status
+                    # Reflect the completed step. The next step is only marked active once claimed.
                     cur.execute("UPDATE document SET status = %s, updated_at = now() WHERE document_id = %s",
-                               (next_doc_status, doc_id))
+                               (completion_doc_status, doc_id))
 
                     # Create next job if there's a next step (propagate metadata for chunking_strategy etc.)
                     metadata_json = json.dumps(job_metadata) if job_metadata else "{}"
@@ -120,17 +126,11 @@ def poll_once():
                             INSERT INTO ingestion_job (document_id, workspace_id, step, status, metadata)
                             VALUES (%s, %s, %s, 'PENDING', %s)
                         """, (doc_id, workspace_id, next_step, metadata_json))
-                    else:
-                        # Check if KG extraction is enabled
-                        cur.execute("SELECT enabled FROM feature_flag WHERE name = 'kg_extraction'")
-                        flag = cur.fetchone()
-                        if flag and flag["enabled"]:
-                            cur.execute("""
-                                INSERT INTO ingestion_job (document_id, workspace_id, step, status, metadata)
-                                VALUES (%s, %s, 'KG_EXTRACT', 'PENDING', %s)
-                            """, (doc_id, workspace_id, metadata_json))
-                            cur.execute("UPDATE document SET status = 'KG_EXTRACTING', updated_at = now() WHERE document_id = %s",
-                                       (doc_id,))
+                    elif step == "EMBED" and _kg_extraction_enabled(cur):
+                        cur.execute("""
+                            INSERT INTO ingestion_job (document_id, workspace_id, step, status, metadata)
+                            VALUES (%s, %s, 'KG_EXTRACT', 'PENDING', %s)
+                        """, (doc_id, workspace_id, metadata_json))
 
                 conn.commit()
 
@@ -166,14 +166,14 @@ def poll_once():
         return True
 
 
-def run_poller():
+def run_poller(worker_name: str = "job-poller"):
     """Main polling loop."""
-    logger.info(f"Job poller started (interval={config.POLL_INTERVAL_S}s)")
+    logger.info("%s started (interval=%ss)", worker_name, config.POLL_INTERVAL_S)
     while True:
         try:
             had_work = poll_once()
             if not had_work:
                 time.sleep(config.POLL_INTERVAL_S)
         except Exception as e:
-            logger.error(f"Poller error: {e}\n{traceback.format_exc()}")
+            logger.error("%s error: %s\n%s", worker_name, e, traceback.format_exc())
             time.sleep(config.POLL_INTERVAL_S * 2)

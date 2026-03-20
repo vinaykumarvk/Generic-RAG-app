@@ -115,7 +115,12 @@ export function createDocumentRoutes(app: FastifyInstance, deps: DocumentRouteDe
     async (request, reply) => {
       const { wid, id } = request.params;
       const result = await queryFn(
-        `SELECT d.*, (SELECT count(*) FROM chunk c WHERE c.document_id = d.document_id) as actual_chunk_count
+        `SELECT d.*,
+                (SELECT count(*) FROM chunk c WHERE c.document_id = d.document_id) as actual_chunk_count,
+                (SELECT json_agg(json_build_object('step', j.step, 'status', j.status, 'progress', j.progress)
+                                 ORDER BY j.created_at, j.job_id)
+                 FROM ingestion_job j
+                 WHERE j.document_id = d.document_id) as jobs
          FROM document d WHERE d.document_id = $1 AND d.workspace_id = $2`,
         [id, wid]
       );

@@ -11,6 +11,7 @@ export const DocumentStatusSchema = z.enum([
   "CONVERTING",
   "METADATA_EXTRACTING",
   "CHUNKING",
+  "CHUNKED",
   "EMBEDDING",
   "SEARCHABLE",
   "KG_EXTRACTING",

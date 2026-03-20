@@ -32,8 +32,9 @@ export function DocumentStatus({ workspaceId, documentId }: { workspaceId: strin
           );
           if (!cancelled) {
             setStatus(data);
-            // Stop polling if document is in a terminal state
-            if (["ACTIVE", "FAILED", "SEARCHABLE", "DELETED"].includes(data.status)) break;
+            const hasInFlightJobs = (data.jobs || []).some((job) => ["PENDING", "PROCESSING", "RETRYING"].includes(job.status));
+            if (["ACTIVE", "FAILED", "DELETED"].includes(data.status)) break;
+            if (data.status === "SEARCHABLE" && !hasInFlightJobs) break;
           }
         } catch {
           // Ignore fetch errors, retry on next interval

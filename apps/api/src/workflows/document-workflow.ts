@@ -1,6 +1,7 @@
 /**
  * Document lifecycle workflow using @puda/workflow-engine.
- * States: UPLOADED → VALIDATING → NORMALIZING → CHUNKING → EMBEDDING → SEARCHABLE → KG_EXTRACTING → ACTIVE
+ * States: UPLOADED → VALIDATING → NORMALIZING → CONVERTING → METADATA_EXTRACTING
+ * → CHUNKING → CHUNKED → EMBEDDING → SEARCHABLE → KG_EXTRACTING → ACTIVE
  * FAILED from any processing state. SKIP_KG shortcut from SEARCHABLE → ACTIVE.
  */
 
@@ -13,7 +14,10 @@ export const DOCUMENT_WORKFLOW: WfDefinition = {
     { stateId: "UPLOADED", type: "initial", taskRequired: false, metadata: { label: "Uploaded" } },
     { stateId: "VALIDATING", type: "intermediate", taskRequired: false, metadata: { label: "Validating" } },
     { stateId: "NORMALIZING", type: "intermediate", taskRequired: false, metadata: { label: "Normalizing" } },
+    { stateId: "CONVERTING", type: "intermediate", taskRequired: false, metadata: { label: "Converting" } },
+    { stateId: "METADATA_EXTRACTING", type: "intermediate", taskRequired: false, metadata: { label: "Extracting Metadata" } },
     { stateId: "CHUNKING", type: "intermediate", taskRequired: false, metadata: { label: "Chunking" } },
+    { stateId: "CHUNKED", type: "intermediate", taskRequired: false, metadata: { label: "Queued for Embedding" } },
     { stateId: "EMBEDDING", type: "intermediate", taskRequired: false, metadata: { label: "Embedding" } },
     { stateId: "SEARCHABLE", type: "intermediate", taskRequired: false, metadata: { label: "Searchable" } },
     { stateId: "KG_EXTRACTING", type: "intermediate", taskRequired: false, metadata: { label: "Extracting KG" } },
@@ -24,8 +28,11 @@ export const DOCUMENT_WORKFLOW: WfDefinition = {
   transitions: [
     { transitionId: "start-validation", fromStateId: "UPLOADED", toStateId: "VALIDATING", trigger: "system", guards: [], actions: [] },
     { transitionId: "start-normalization", fromStateId: "VALIDATING", toStateId: "NORMALIZING", trigger: "system", guards: [], actions: [] },
-    { transitionId: "start-chunking", fromStateId: "NORMALIZING", toStateId: "CHUNKING", trigger: "system", guards: [], actions: [] },
-    { transitionId: "start-embedding", fromStateId: "CHUNKING", toStateId: "EMBEDDING", trigger: "system", guards: [], actions: [] },
+    { transitionId: "start-conversion", fromStateId: "NORMALIZING", toStateId: "CONVERTING", trigger: "system", guards: [], actions: [] },
+    { transitionId: "start-metadata-extraction", fromStateId: "CONVERTING", toStateId: "METADATA_EXTRACTING", trigger: "system", guards: [], actions: [] },
+    { transitionId: "start-chunking", fromStateId: "METADATA_EXTRACTING", toStateId: "CHUNKING", trigger: "system", guards: [], actions: [] },
+    { transitionId: "chunking-complete", fromStateId: "CHUNKING", toStateId: "CHUNKED", trigger: "system", guards: [], actions: [] },
+    { transitionId: "start-embedding", fromStateId: "CHUNKED", toStateId: "EMBEDDING", trigger: "system", guards: [], actions: [] },
     { transitionId: "embedding-complete", fromStateId: "EMBEDDING", toStateId: "SEARCHABLE", trigger: "system", guards: [], actions: [] },
     { transitionId: "start-kg", fromStateId: "SEARCHABLE", toStateId: "KG_EXTRACTING", trigger: "system", guards: [], actions: [] },
     { transitionId: "skip-kg", fromStateId: "SEARCHABLE", toStateId: "ACTIVE", trigger: "system", guards: [], actions: [] },
@@ -33,7 +40,10 @@ export const DOCUMENT_WORKFLOW: WfDefinition = {
     // Failure transitions
     { transitionId: "validation-failed", fromStateId: "VALIDATING", toStateId: "FAILED", trigger: "system", guards: [], actions: [] },
     { transitionId: "normalization-failed", fromStateId: "NORMALIZING", toStateId: "FAILED", trigger: "system", guards: [], actions: [] },
+    { transitionId: "conversion-failed", fromStateId: "CONVERTING", toStateId: "FAILED", trigger: "system", guards: [], actions: [] },
+    { transitionId: "metadata-failed", fromStateId: "METADATA_EXTRACTING", toStateId: "FAILED", trigger: "system", guards: [], actions: [] },
     { transitionId: "chunking-failed", fromStateId: "CHUNKING", toStateId: "FAILED", trigger: "system", guards: [], actions: [] },
+    { transitionId: "queued-embedding-failed", fromStateId: "CHUNKED", toStateId: "FAILED", trigger: "system", guards: [], actions: [] },
     { transitionId: "embedding-failed", fromStateId: "EMBEDDING", toStateId: "FAILED", trigger: "system", guards: [], actions: [] },
     { transitionId: "kg-failed", fromStateId: "KG_EXTRACTING", toStateId: "FAILED", trigger: "system", guards: [], actions: [] },
     // Soft delete from any non-processing state

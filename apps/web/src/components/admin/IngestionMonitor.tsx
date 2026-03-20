@@ -47,7 +47,7 @@ export function IngestionMonitor({ workspaceId }: { workspaceId: string }) {
 
   const docs = data?.documents || [];
   const pending = docs.filter((d) => d.status === "UPLOADED");
-  const processing = docs.filter((d) => ["VALIDATING", "NORMALIZING", "CONVERTING", "METADATA_EXTRACTING", "CHUNKING", "EMBEDDING", "KG_EXTRACTING", "REPROCESSING"].includes(d.status));
+  const processing = docs.filter((d) => ["VALIDATING", "NORMALIZING", "CONVERTING", "METADATA_EXTRACTING", "CHUNKING", "CHUNKED", "EMBEDDING", "KG_EXTRACTING", "REPROCESSING"].includes(d.status));
   const failed = docs.filter((d) => d.status === "FAILED");
   const completed = docs.filter((d) => ["SEARCHABLE", "ACTIVE"].includes(d.status));
 
