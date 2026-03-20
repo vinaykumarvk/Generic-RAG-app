@@ -2,8 +2,8 @@
 
 import os
 
-OPENAI_KEY = os.getenv("OPEN_AI_API_KEY") or os.getenv("OPENAI_API_KEY", "")
-GEMINI_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("gemini_api_key", "")
+OPENAI_KEY = (os.getenv("OPEN_AI_API_KEY") or os.getenv("OPENAI_API_KEY", "")).strip()
+GEMINI_KEY = (os.getenv("GEMINI_API_KEY") or os.getenv("gemini_api_key", "")).strip()
 
 
 class Config:
