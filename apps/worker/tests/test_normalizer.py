@@ -1,3 +1,4 @@
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -30,6 +31,28 @@ class NormalizerTests(unittest.TestCase):
         self.assertEqual(page_count, 2)
         ocr_pdf.assert_called_once_with("/tmp/sample.pdf", "doc-2")
         reset_client.assert_not_called()
+
+    def test_extract_doc_uses_antiword_when_available(self):
+        with patch("shutil.which", side_effect=lambda cmd: "/usr/bin/antiword" if cmd == "antiword" else None), \
+                patch(
+                    "subprocess.run",
+                    return_value=subprocess.CompletedProcess(
+                        args=["antiword", "/tmp/sample.doc"],
+                        returncode=0,
+                        stdout="converted text",
+                        stderr="",
+                    ),
+                ) as run:
+            text, page_count = normalizer._extract_doc("/tmp/sample.doc")
+
+        self.assertEqual(text, "converted text")
+        self.assertEqual(page_count, 1)
+        run.assert_called_once_with(
+            ["antiword", "/tmp/sample.doc"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
 
 
 if __name__ == "__main__":

@@ -1,10 +1,11 @@
 # IntelliRAG Python Worker — ingestion pipeline
 FROM python:3.11-slim
 
-# Install system dependencies (Tesseract for OCR, poppler for PDF)
+# Install system dependencies (OCR + legacy DOC text extraction)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-eng \
+    antiword \
     libpq-dev \
     poppler-utils \
     gcc \
