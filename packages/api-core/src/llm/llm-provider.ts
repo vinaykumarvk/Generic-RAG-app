@@ -607,7 +607,9 @@ export function createLlmProvider(deps: LlmProviderDeps): LlmProvider {
       if (res.rows.length > 0) {
         cachedConfig = res.rows[0] as unknown as LlmProviderConfig;
         if (!cachedConfig.api_key_enc && envKey) cachedConfig.api_key_enc = envKey;
-        if (envModel && cachedConfig.provider === "openai") cachedConfig.model_id = envModel;
+        // Only override model from env when using actual OpenAI API (not OpenRouter or other OpenAI-compatible APIs)
+        const isActualOpenAi = cachedConfig.provider === "openai" && cachedConfig.api_base_url?.includes("api.openai.com");
+        if (envModel && isActualOpenAi) cachedConfig.model_id = envModel;
         cacheExpiry = Date.now() + CACHE_TTL_MS;
         return cachedConfig;
       }
@@ -849,7 +851,9 @@ export function createLlmProvider(deps: LlmProviderDeps): LlmProvider {
 
   // ── Embedding ─────────────────────────────────────────────────────────────
   async function llmEmbed(request: EmbeddingRequest): Promise<EmbeddingResponse | null> {
-    const config = await loadDefaultConfig();
+    // Check for EMBEDDING use-case provider first, then fall back to default
+    let config = await loadConfigForUseCase("EMBEDDING");
+    if (!config) config = await loadDefaultConfig();
     if (!config) return null;
 
     const adapter = EMBEDDING_ADAPTERS[config.provider];

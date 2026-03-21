@@ -168,6 +168,32 @@ async function bootstrapProviders(queryFn: (text: string, params?: unknown[]) =>
         logInfo("Bootstrap: Gemini provider assigned to KG_EXTRACTION");
       }
     }
+
+    // Assign OpenAI provider to EMBEDDING if not already assigned (matches stored 768-dim vectors)
+    const openai = await queryFn(
+      `SELECT config_id, config_jsonb FROM llm_provider_config
+       WHERE provider = 'openai' AND api_base_url LIKE '%api.openai.com%' AND is_active = TRUE LIMIT 1`,
+    );
+    if (openai.rows.length > 0) {
+      const row = openai.rows[0] as { config_id: string; config_jsonb: Record<string, unknown> };
+      const useCases = (row.config_jsonb?.assigned_use_cases as string[]) || [];
+      if (!useCases.includes("EMBEDDING")) {
+        await queryFn(
+          `UPDATE llm_provider_config
+           SET config_jsonb = config_jsonb || $1::jsonb
+           WHERE config_id = $2`,
+          [
+            JSON.stringify({
+              assigned_use_cases: [...useCases, "EMBEDDING"],
+              embedding_model: "text-embedding-3-small",
+              embedding_dimensions: 768,
+            }),
+            row.config_id,
+          ],
+        );
+        logInfo("Bootstrap: OpenAI provider assigned to EMBEDDING (768-dim)");
+      }
+    }
   } catch (err) {
     logWarn("Bootstrap providers check failed (non-fatal)", { error: String(err) });
   }
