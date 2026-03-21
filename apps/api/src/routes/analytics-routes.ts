@@ -256,17 +256,19 @@ export function createAnalyticsRoutes(app: FastifyInstance, deps: { queryFn: Que
 
         const [activeUsersResult, queriesPerUserResult] = await Promise.all([
           queryFn(
-            `SELECT count(DISTINCT user_id)::int as active_users
-             FROM retrieval_run
-             WHERE workspace_id = $1 AND created_at >= now() - interval '30 days'`,
+            `SELECT count(DISTINCT c.user_id)::int as active_users
+             FROM retrieval_run rr
+             JOIN conversation c ON c.conversation_id = rr.conversation_id
+             WHERE rr.workspace_id = $1 AND rr.created_at >= now() - interval '30 days'`,
             [wid]
           ),
           queryFn(
-            `SELECT u.display_name, u.email, count(*)::int as query_count
+            `SELECT COALESCE(u.full_name, u.username) as display_name, u.email, count(*)::int as query_count
              FROM retrieval_run rr
-             JOIN app_user u ON u.user_id = rr.user_id
+             JOIN conversation c ON c.conversation_id = rr.conversation_id
+             JOIN user_account u ON u.user_id = c.user_id
              WHERE rr.workspace_id = $1 AND rr.created_at >= now() - interval '30 days'
-             GROUP BY u.user_id, u.display_name, u.email
+             GROUP BY u.user_id, u.full_name, u.username, u.email
              ORDER BY query_count DESC
              LIMIT 10`,
             [wid]
