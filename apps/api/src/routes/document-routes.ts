@@ -227,7 +227,7 @@ export function createDocumentRoutes(app: FastifyInstance, deps: DocumentRouteDe
   // Upload document (multipart)
   app.post<{ Params: { wid: string } }>(
     "/api/v1/workspaces/:wid/documents",
-    { config: { rateLimit: { max: 300, timeWindow: "1 minute" } } },
+    {},
     async (request, reply) => {
       const { wid } = request.params;
       const parts = request.parts();
