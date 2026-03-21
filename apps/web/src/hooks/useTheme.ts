@@ -3,15 +3,6 @@ import { useState, useEffect, useCallback } from "react";
 /** Theme identifier — matches [data-theme="..."] selectors in index.css */
 export type ThemeId =
   | "default"
-  | "teal"
-  | "indigo"
-  | "emerald"
-  | "amber"
-  | "rose"
-  | "violet"
-  | "cyan"
-  | "slate"
-  | "orange"
   | "tokyo-night"
   | "dracula"
   | "nord"
@@ -36,17 +27,7 @@ export interface ThemeMeta {
 
 /** All available themes with display metadata */
 export const CUSTOM_THEMES: ThemeMeta[] = [
-  // Light themes
-  { id: "default",    label: "Blue (Default)",  group: "Light",         swatch: "#2563eb" },
-  { id: "teal",       label: "Teal",            group: "Light",         swatch: "#0d9488" },
-  { id: "indigo",     label: "Indigo",          group: "Light",         swatch: "#4f46e5" },
-  { id: "emerald",    label: "Emerald",         group: "Light",         swatch: "#059669" },
-  { id: "amber",      label: "Amber",           group: "Light",         swatch: "#d97706" },
-  { id: "rose",       label: "Rose",            group: "Light",         swatch: "#e11d48" },
-  { id: "violet",     label: "Violet",          group: "Light",         swatch: "#7c3aed" },
-  { id: "cyan",       label: "Cyan",            group: "Light",         swatch: "#0891b2" },
-  { id: "slate",      label: "Slate",           group: "Light",         swatch: "#475569" },
-  { id: "orange",     label: "Orange",          group: "Light",         swatch: "#ea580c" },
+  { id: "default", label: "Blue (Default)", group: "Light", swatch: "#2563eb" },
   // Dark themes
   { id: "tokyo-night",    label: "Tokyo Night",     group: "Dark",  swatch: "#7aa2f7" },
   { id: "dracula",        label: "Dracula",          group: "Dark",  swatch: "#bd93f9" },
@@ -71,6 +52,15 @@ export const THEME_LABELS: Record<ThemeId, string> = Object.fromEntries(
 ) as Record<ThemeId, string>;
 
 const STORAGE_KEY = "intellirag_theme";
+const VALID_THEME_IDS = new Set<ThemeId>(CUSTOM_THEMES.map((theme) => theme.id));
+const DARK_THEMES: ReadonlySet<ThemeId> = new Set([
+  "tokyo-night", "dracula", "nord", "catppuccin", "solarized-dark",
+  "rolex", "gruvbox", "onedark", "rosepine", "ayu", "github-dark", "sunset", "monokai",
+]);
+
+function isThemeId(value: string | null): value is ThemeId {
+  return !!value && VALID_THEME_IDS.has(value as ThemeId);
+}
 
 function applyTheme(themeId: ThemeId) {
   const el = document.documentElement;
@@ -88,7 +78,9 @@ function applyTheme(themeId: ThemeId) {
 export function useTheme() {
   const [theme, setThemeState] = useState<ThemeId>(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
-    return (saved as ThemeId) || "default";
+    if (isThemeId(saved)) return saved;
+    if (saved) localStorage.removeItem(STORAGE_KEY);
+    return "default";
   });
 
   // Apply theme on mount and when it changes
@@ -105,10 +97,6 @@ export function useTheme() {
     setThemeState(id);
   }, []);
 
-  const DARK_THEMES: ReadonlySet<ThemeId> = new Set([
-    "tokyo-night", "dracula", "nord", "catppuccin", "solarized-dark",
-    "rolex", "gruvbox", "onedark", "rosepine", "ayu", "github-dark", "sunset", "monokai",
-  ]);
   const isDark = DARK_THEMES.has(theme);
 
   return { theme, setTheme, isDark, themes: CUSTOM_THEMES };
@@ -121,10 +109,12 @@ export function useTheme() {
  */
 export function applyStoredTheme() {
   const saved = localStorage.getItem(STORAGE_KEY) as ThemeId | null;
-  if (saved && saved !== "default") {
+  if (isThemeId(saved) && saved !== "default") {
     document.documentElement.setAttribute("data-theme", saved);
   } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
     // Auto-detect dark mode preference and apply a default dark theme
     document.documentElement.setAttribute("data-theme", "tokyo-night");
+  } else if (saved && !isThemeId(saved)) {
+    localStorage.removeItem(STORAGE_KEY);
   }
 }

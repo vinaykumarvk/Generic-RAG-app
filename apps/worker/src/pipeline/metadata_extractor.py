@@ -7,6 +7,7 @@ Stores to document.extracted_metadata and flags low-confidence for review.
 
 import json
 import logging
+import time
 import httpx
 from ..config import config
 from ..db import get_connection, get_cursor
@@ -56,11 +57,15 @@ def extract_metadata(document_id: str, workspace_id: str):
     # Use first 3000 chars for metadata extraction
     sample = text[:3000]
 
+    provider, model_name = _current_model_details()
+    started_at = time.perf_counter()
+
     try:
         metadata = _extract_with_llm(sample)
     except Exception as e:
         logger.warning(f"LLM metadata extraction failed for {document_id}: {e}")
         metadata = {"confidence": 0.0, "error": str(e)}
+    latency_ms = int((time.perf_counter() - started_at) * 1000)
 
     confidence = metadata.get("confidence", 0.0)
     if isinstance(confidence, str):
@@ -130,10 +135,29 @@ def extract_metadata(document_id: str, workspace_id: str):
                 """, (document_id,))
 
                 logger.info("Document flagged for metadata review",
-                           extra={"document_id": document_id, "confidence": confidence,
-                                  "missing": missing_mandatory})
+                            extra={"document_id": document_id, "confidence": confidence,
+                                   "missing": missing_mandatory})
+
+            cur.execute("""
+                INSERT INTO model_prediction_log
+                  (provider, model_name, use_case, entity_type, entity_id, prediction, latency_ms, fallback_used)
+                VALUES (%s, %s, 'metadata_extract', 'DOCUMENT', %s, %s::jsonb, %s, %s)
+            """, (
+                provider,
+                model_name,
+                document_id,
+                json.dumps(metadata, default=str),
+                latency_ms,
+                "error" in metadata,
+            ))
 
     logger.info(f"Metadata extracted for {document_id}: confidence={confidence:.2f}")
+
+
+def _current_model_details() -> tuple[str, str]:
+    if config.LLM_PROVIDER == "openai":
+        return "openai", config.OPENAI_CHAT_MODEL
+    return config.LLM_PROVIDER, config.OLLAMA_CHAT_MODEL
 
 
 def _extract_with_llm(text: str) -> dict:

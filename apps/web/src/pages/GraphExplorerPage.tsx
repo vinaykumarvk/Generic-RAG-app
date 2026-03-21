@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useDeferredValue, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
@@ -19,6 +19,7 @@ export function GraphExplorerPage() {
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [hops, setHops] = useState(1);
+  const deferredSearchTerm = useDeferredValue(searchTerm.trim());
 
   const { data: stats, isLoading } = useQuery({
     queryKey: ["graph-stats", workspaceId],
@@ -50,7 +51,7 @@ export function GraphExplorerPage() {
               type="search"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search nodes..."
+              placeholder="Search person, police station, crime ID..."
               className="pl-8 pr-3 py-1.5 text-xs border border-skin rounded-lg bg-surface text-skin-base focus:ring-1 focus:ring-primary-500 outline-none w-48"
             />
           </div>
@@ -79,6 +80,8 @@ export function GraphExplorerPage() {
             <GraphCanvas
               workspaceId={workspaceId!}
               typeFilter={typeFilter}
+              searchTerm={deferredSearchTerm}
+              hops={hops}
               onNodeSelect={setSelectedNodeId}
             />
           ) : (

@@ -9,8 +9,12 @@ interface Analytics {
   cache: { hit_rate: number; hits: number; total: number };
   feedback: { avg_rating: number; total: number; thumbs_up: number; thumbs_down: number };
   top_questions: Array<{ original_query: string; count: number }>;
-  llm_usage: Array<{ provider: string; model_name: string; calls: number; avg_latency: number }>;
+  llm_usage: Array<{ provider: string; model_name: string; calls: number; avg_latency: number | null }>;
   document_stats: Array<{ status: string; count: number }>;
+}
+
+function formatLatency(latency: number | null): string {
+  return latency == null ? "avg n/a" : `avg ${Math.round(latency)}ms`;
 }
 
 export function AnalyticsDashboard({ workspaceId }: { workspaceId: string }) {
@@ -83,7 +87,7 @@ export function AnalyticsDashboard({ workspaceId }: { workspaceId: string }) {
           {data.llm_usage.map((u, i) => (
             <div key={i} className="flex items-center justify-between text-sm">
               <span className="font-medium">{u.provider}/{u.model_name}</span>
-              <span className="text-skin-muted">{u.calls} calls, avg {Math.round(u.avg_latency)}ms</span>
+              <span className="text-skin-muted">{u.calls} calls, {formatLatency(u.avg_latency)}</span>
             </div>
           ))}
           {data.llm_usage.length === 0 && <p className="text-sm text-skin-muted">No LLM usage yet</p>}

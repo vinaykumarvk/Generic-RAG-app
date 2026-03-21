@@ -51,8 +51,9 @@ function ThemeList({ onSelect }: { onSelect?: () => void }) {
                 }}
                 className={`w-full text-left px-4 py-2 text-sm flex items-center gap-3 transition-colors
                   ${theme === t.id
-                    ? "bg-primary-50 text-primary-700"
+                    ? "bg-surface-secondary text-text-primary"
                     : "text-text-secondary hover:bg-surface-secondary"}`}
+                aria-pressed={theme === t.id}
               >
                 <span
                   className="w-4 h-4 rounded-full border-2 flex-shrink-0"

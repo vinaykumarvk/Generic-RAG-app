@@ -14,6 +14,10 @@ interface QueryVolumeResponse {
 }
 
 const DAY_OPTIONS = [7, 30, 90] as const;
+const SVG_HEIGHT = 132;
+const PLOT_HEIGHT = 92;
+const BASELINE_Y = 108;
+const LABEL_Y = 124;
 
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr);
@@ -48,7 +52,7 @@ export function QueryVolumeChart({ workspaceId }: { workspaceId: string }) {
     return (
       <div className="bg-surface border border-skin rounded-xl p-6 animate-pulse">
         <div className="h-4 bg-surface-alt rounded w-40 mb-4" />
-        <div className="h-48 bg-surface-alt rounded" />
+        <div className="h-36 bg-surface-alt rounded" />
       </div>
     );
   }
@@ -98,7 +102,7 @@ export function QueryVolumeChart({ workspaceId }: { workspaceId: string }) {
       {/* SVG Bar Chart */}
       <div className="overflow-x-auto">
         <svg
-          viewBox={`0 0 ${Math.max(rows.length * 28, 200)} 180`}
+          viewBox={`0 0 ${Math.max(rows.length * 28, 200)} ${SVG_HEIGHT}`}
           className="w-full"
           style={{ minWidth: `${Math.max(rows.length * 28, 200)}px` }}
           role="img"
@@ -106,7 +110,7 @@ export function QueryVolumeChart({ workspaceId }: { workspaceId: string }) {
         >
           {/* Y-axis gridlines */}
           {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
-            const y = 160 - frac * 140;
+            const y = BASELINE_Y - frac * PLOT_HEIGHT;
             const label = Math.round(frac * maxCount);
             return (
               <g key={frac}>
@@ -136,9 +140,9 @@ export function QueryVolumeChart({ workspaceId }: { workspaceId: string }) {
           {/* Bars */}
           {rows.map((row, i) => {
             const count = Number(row.count);
-            const barHeight = maxCount > 0 ? (count / maxCount) * 140 : 0;
+            const barHeight = maxCount > 0 ? (count / maxCount) * PLOT_HEIGHT : 0;
             const x = i * 28 + 4;
-            const barY = 160 - barHeight;
+            const barY = BASELINE_Y - barHeight;
 
             return (
               <g key={row.day}>
@@ -157,7 +161,7 @@ export function QueryVolumeChart({ workspaceId }: { workspaceId: string }) {
                 {(rows.length <= 14 || i % Math.ceil(rows.length / 14) === 0) && (
                   <text
                     x={x + 10}
-                    y="175"
+                    y={LABEL_Y}
                     textAnchor="middle"
                     fontSize="7"
                     fill="rgb(var(--color-text-secondary))"

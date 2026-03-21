@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
+import { Loader2, Search } from "lucide-react";
 
 interface GraphNode {
   node_id: string;
   name: string;
   node_type: string;
+  subtype?: string;
   description: string;
 }
 
@@ -63,10 +65,12 @@ function resolveNodeColors(): Record<string, string> {
 interface GraphCanvasProps {
   workspaceId: string;
   typeFilter: string | null;
+  searchTerm: string;
+  hops: number;
   onNodeSelect: (nodeId: string) => void;
 }
 
-export function GraphCanvas({ workspaceId, typeFilter, onNodeSelect }: GraphCanvasProps) {
+export function GraphCanvas({ workspaceId, typeFilter, searchTerm, hops, onNodeSelect }: GraphCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ width: 800, height: 600 });
@@ -88,26 +92,28 @@ export function GraphCanvas({ workspaceId, typeFilter, onNodeSelect }: GraphCanv
     return () => observer.disconnect();
   }, []);
 
-  const { data } = useQuery({
-    queryKey: ["graph-data", workspaceId, typeFilter],
+  const { data, isLoading } = useQuery({
+    queryKey: ["graph-data", workspaceId, typeFilter, searchTerm, hops],
     queryFn: async () => {
+      const nodeParams = new URLSearchParams({
+        limit: searchTerm ? "24" : "60",
+      });
+      if (typeFilter) nodeParams.set("type", typeFilter);
+      if (searchTerm) nodeParams.set("search", searchTerm);
+
       const nodesResult = await apiFetch<{ nodes: GraphNode[] }>(
-        `/api/v1/workspaces/${workspaceId}/graph/nodes?limit=100${typeFilter ? `&type=${typeFilter}` : ""}`
+        `/api/v1/workspaces/${workspaceId}/graph/nodes?${nodeParams.toString()}`
       );
       if (nodesResult.nodes.length === 0) return { nodes: [], edges: [] };
 
-      // Multi-seed explore: pick up to 10 seeds spread evenly across the node list
-      const seeds = nodesResult.nodes;
-      const step = Math.max(1, Math.floor(seeds.length / 10));
-      const seedIds: string[] = [];
-      for (let i = 0; i < seeds.length && seedIds.length < 10; i += step) {
-        seedIds.push(seeds[i].node_id);
-      }
+      const maxSeeds = searchTerm ? 8 : 12;
+      const seedIds = nodesResult.nodes.slice(0, maxSeeds).map((node) => node.node_id);
+      const exploreLimit = hops === 1 ? 120 : hops === 2 ? 180 : 240;
 
       const exploreResults = await Promise.all(
         seedIds.map((id) =>
           apiFetch<GraphData>(
-            `/api/v1/workspaces/${workspaceId}/graph/explore?node_id=${id}&hops=1&limit=200`
+            `/api/v1/workspaces/${workspaceId}/graph/explore?node_id=${id}&hops=${hops}&limit=${exploreLimit}`
           )
         )
       );
@@ -270,6 +276,37 @@ export function GraphCanvas({ workspaceId, typeFilter, onNodeSelect }: GraphCanv
       ctx.stroke();
     }
 
+    // Show edge labels on focused graphs so relationships are readable.
+    if (searchTerm || data.edges.length <= 18) {
+      const labelledEdges = [...data.edges]
+        .sort((a, b) => b.weight - a.weight)
+        .slice(0, Math.min(data.edges.length, searchTerm ? 18 : 12));
+
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = "10px sans-serif";
+
+      for (const edge of labelledEdges) {
+        const p1 = positions.get(edge.source);
+        const p2 = positions.get(edge.target);
+        if (!p1 || !p2) continue;
+
+        const midX = (p1.x + p2.x) / 2;
+        const midY = (p1.y + p2.y) / 2;
+        const label = edge.edge_type.replaceAll("_", " ");
+        const metrics = ctx.measureText(label);
+
+        ctx.save();
+        ctx.globalAlpha = 0.92;
+        ctx.fillStyle = outlineColor;
+        ctx.fillRect(midX - metrics.width / 2 - 4, midY - 8, metrics.width + 8, 14);
+        ctx.restore();
+
+        ctx.fillStyle = textColor;
+        ctx.fillText(label, midX, midY);
+      }
+    }
+
     // Draw nodes
     for (const node of data.nodes) {
       const pos = positions.get(node.node_id);
@@ -287,9 +324,30 @@ export function GraphCanvas({ workspaceId, typeFilter, onNodeSelect }: GraphCanv
       ctx.font = "11px sans-serif";
       ctx.fillStyle = textColor;
       ctx.textAlign = "center";
-      ctx.fillText(node.name.slice(0, 20), pos.x, pos.y + 20);
+      const nodeLabel = node.subtype ? `${node.name.slice(0, 18)} (${node.subtype})` : node.name.slice(0, 20);
+      ctx.fillText(nodeLabel, pos.x, pos.y + 20);
     }
   }, [data, dims]);
+
+  if (isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center text-skin-muted">
+        <Loader2 className="animate-spin" aria-hidden="true" />
+      </div>
+    );
+  }
+
+  if (!data || data.nodes.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-center text-skin-muted">
+        <div>
+          <Search size={28} className="mx-auto mb-3" aria-hidden="true" />
+          <p className="font-medium text-skin-base">No matching graph nodes</p>
+          <p className="mt-1 text-sm">Try a broader search term, a different node type, or fewer hop constraints.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div ref={containerRef} className="w-full h-full">

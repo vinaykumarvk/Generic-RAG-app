@@ -51,14 +51,87 @@ export function createAnalyticsRoutes(app: FastifyInstance, deps: { queryFn: Que
            GROUP BY original_query ORDER BY count DESC LIMIT 10`,
           [wid, days]
         ),
-        // LLM usage
+        // LLM usage across user-facing answers, worker metadata extraction, and workspace KG extraction
         queryFn(
-          `SELECT provider, model_name, count(*) as calls,
-                  sum(prompt_tokens) as total_prompt_tokens, sum(output_tokens) as total_output_tokens,
-                  avg(latency_ms) as avg_latency
-           FROM model_prediction_log WHERE created_at > now() - $1::int * interval '1 day'
-           GROUP BY provider, model_name ORDER BY calls DESC`,
-          [days]
+          `WITH message_usage AS (
+             SELECT
+               m.model_provider AS provider,
+               m.model_id AS model_name,
+               count(*)::int AS calls,
+               avg(m.latency_ms)::numeric AS avg_latency
+             FROM message m
+             JOIN conversation c ON c.conversation_id = m.conversation_id
+             WHERE c.workspace_id = $1
+               AND m.role = 'assistant'
+               AND m.model_provider IS NOT NULL
+               AND m.model_id IS NOT NULL
+               AND m.created_at > now() - $2::int * interval '1 day'
+             GROUP BY m.model_provider, m.model_id
+           ),
+           summary_usage AS (
+             SELECT
+               cs.model_provider AS provider,
+               cs.model_id AS model_name,
+               count(*)::int AS calls,
+               avg(cs.latency_ms)::numeric AS avg_latency
+             FROM conversation_summary cs
+             JOIN conversation c ON c.conversation_id = cs.conversation_id
+             WHERE c.workspace_id = $1
+               AND cs.model_provider IS NOT NULL
+               AND cs.model_id IS NOT NULL
+               AND cs.created_at > now() - $2::int * interval '1 day'
+             GROUP BY cs.model_provider, cs.model_id
+           ),
+           worker_usage AS (
+             SELECT
+               COALESCE(mpl.provider, 'worker') AS provider,
+               COALESCE(mpl.model_name, 'unknown') AS model_name,
+               count(*)::int AS calls,
+               avg(mpl.latency_ms)::numeric AS avg_latency
+             FROM model_prediction_log mpl
+             JOIN document d
+               ON mpl.entity_type = 'DOCUMENT'
+              AND mpl.entity_id = d.document_id::text
+             WHERE d.workspace_id = $1
+               AND mpl.use_case = 'metadata_extract'
+               AND mpl.created_at > now() - $2::int * interval '1 day'
+             GROUP BY COALESCE(mpl.provider, 'worker'), COALESCE(mpl.model_name, 'unknown')
+           ),
+           kg_usage AS (
+             SELECT
+               CASE
+                 WHEN kp.extraction_model ILIKE 'gemini%' THEN 'gemini'
+                 WHEN kp.extraction_model ILIKE 'gpt%' OR kp.extraction_model ILIKE 'o%' THEN 'openai'
+                 ELSE 'worker'
+               END AS provider,
+               kp.extraction_model AS model_name,
+               count(DISTINCT kp.document_id)::int AS calls,
+               NULL::numeric AS avg_latency
+             FROM kg_provenance kp
+             WHERE kp.workspace_id = $1
+               AND kp.document_id IS NOT NULL
+               AND kp.extraction_model IS NOT NULL
+               AND kp.extracted_at > now() - $2::int * interval '1 day'
+             GROUP BY 1, 2
+           ),
+           combined AS (
+             SELECT * FROM message_usage
+             UNION ALL
+             SELECT * FROM summary_usage
+             UNION ALL
+             SELECT * FROM worker_usage
+             UNION ALL
+             SELECT * FROM kg_usage
+           )
+           SELECT
+             provider,
+             model_name,
+             sum(calls)::int AS calls,
+             round(avg(avg_latency))::int AS avg_latency
+           FROM combined
+           GROUP BY provider, model_name
+           ORDER BY calls DESC, provider, model_name`,
+          [wid, days]
         ),
         // Document processing stats
         queryFn(

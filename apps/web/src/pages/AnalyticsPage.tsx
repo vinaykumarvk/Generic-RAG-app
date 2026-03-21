@@ -19,7 +19,7 @@ interface AnalyticsData {
   cache: { hit_rate: number; hits: number; total: number };
   feedback: { avg_rating: number; total: number; thumbs_up: number; thumbs_down: number };
   top_questions: Array<{ original_query: string; count: number }>;
-  llm_usage: Array<{ provider: string; model_name: string; calls: number; avg_latency: number }>;
+  llm_usage: Array<{ provider: string; model_name: string; calls: number; avg_latency: number | null }>;
   document_stats: Array<{ status: string; count: number }>;
 }
 
@@ -75,7 +75,7 @@ function buildCsvContent(data: AnalyticsData): string {
   // LLM usage
   lines.push("Provider,Model,Calls,Avg Latency (ms)");
   for (const row of data.llm_usage) {
-    lines.push(`${row.provider},${row.model_name},${row.calls},${Math.round(row.avg_latency)}`);
+    lines.push(`${row.provider},${row.model_name},${row.calls},${row.avg_latency == null ? "" : Math.round(row.avg_latency)}`);
   }
   lines.push("");
 

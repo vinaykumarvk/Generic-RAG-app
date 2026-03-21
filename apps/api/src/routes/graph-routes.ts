@@ -27,6 +27,7 @@ export function createGraphRoutes(app: FastifyInstance, deps: GraphRouteDeps) {
         const offset = (page - 1) * limit;
 
         let whereClause = "workspace_id = $1";
+        let orderBy = "source_count DESC, name";
         const params: unknown[] = [wid];
 
         if (type) {
@@ -34,16 +35,38 @@ export function createGraphRoutes(app: FastifyInstance, deps: GraphRouteDeps) {
           whereClause += ` AND node_type = $${params.length}`;
         }
 
-        if (search) {
-          params.push(search.toLowerCase());
-          whereClause += ` AND (search_tsv @@ plainto_tsquery('english', $${params.length}) OR similarity(normalized_name, $${params.length}) > 0.2 OR $${params.length} = ANY(aliases))`;
+        const trimmedSearch = search?.trim();
+        if (trimmedSearch) {
+          const searchLower = trimmedSearch.toLowerCase();
+          params.push(searchLower);
+          const searchIndex = params.length;
+          params.push(`%${trimmedSearch}%`);
+          const likeIndex = params.length;
+          whereClause += ` AND (
+            search_tsv @@ websearch_to_tsquery('english', $${searchIndex})
+            OR similarity(normalized_name, $${searchIndex}) > 0.2
+            OR similarity(coalesce(subtype, ''), $${searchIndex}) > 0.2
+            OR EXISTS (
+              SELECT 1
+              FROM unnest(coalesce(aliases, '{}'::text[])) AS alias
+              WHERE lower(alias) LIKE '%' || $${searchIndex} || '%'
+            )
+            OR properties::text ILIKE $${likeIndex}
+          )`;
+          orderBy = `ts_rank_cd(search_tsv, websearch_to_tsquery('english', $${searchIndex})) DESC NULLS LAST,
+                     GREATEST(
+                       similarity(normalized_name, $${searchIndex}),
+                       similarity(coalesce(subtype, ''), $${searchIndex})
+                     ) DESC,
+                     source_count DESC,
+                     name`;
         }
 
         params.push(limit, offset);
         const result = await queryFn(
           `SELECT node_id, name, node_type, subtype, description, confidence, sensitivity_level, source_count, created_at
            FROM graph_node WHERE ${whereClause}
-           ORDER BY source_count DESC, name
+           ORDER BY ${orderBy}
            LIMIT $${params.length - 1} OFFSET $${params.length}`,
           params
         );
