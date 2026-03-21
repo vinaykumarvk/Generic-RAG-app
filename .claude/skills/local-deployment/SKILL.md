@@ -48,11 +48,13 @@ If a P0/P1 issue cannot be fixed in 3 cycles, escalate as BLOCKER in the readine
 ## Troubleshooting Quick Reference
 
 **API won't start — check in this order:**
-1. Port in use? → `lsof -ti:$API_PORT | xargs kill -9`
-2. Stale package dist? → Rebuild: `npm run build:shared && npm run build:api-core`
-3. Missing env var? → Check `.env` for `DATABASE_URL`, `JWT_SECRET`, `PORT`
-4. DB not running? → `psql "$DATABASE_URL" -c "SELECT 1"`
-5. Migrations not run? → Check for `relation "X" does not exist` in error output
+1. DATABASE_URL pointing to Cloud SQL (port 15435)? → Check `.env`, must NOT be localhost:5432
+2. cloud-sql-proxy running? → `pgrep -f cloud-sql-proxy && lsof -ti:15435`
+3. Port in use? → `lsof -ti:$API_PORT | xargs kill -9`
+4. Stale package dist? → Rebuild: `npm run build:shared && npm run build:api-core`
+5. Missing env var? → Check `.env` for `DATABASE_URL`, `JWT_SECRET`, `PORT`
+6. DB not running? → `psql "$DATABASE_URL" -c "SELECT 1"`
+7. Migrations not run? → Check for `relation "X" does not exist` in error output
 
 **Frontend loads but features don't work:**
 1. API not running? → `curl -sf http://localhost:$API_PORT/health`
@@ -195,55 +197,107 @@ npm install --package-lock-only
 
 ---
 
-## Phase 2: Database Connectivity
+## Phase 2: Database Connectivity — Cloud SQL Required
 
-**WHY**: The most common local deployment failure is the API starting but every query returning ECONNREFUSED because the database isn't running or the connection string is wrong.
+**WHY**: The most common local deployment failure is the API starting but every query returning ECONNREFUSED because the database isn't running or the connection string is wrong. IntelliRAG **must** connect to Cloud SQL via `cloud-sql-proxy` — never a local PostgreSQL instance.
 
-### 2.1: Verify Database Connection String
+### 2.0: Enforce Cloud SQL Connection (P0 Gate)
 
-```bash
-# Read the DATABASE_URL from .env
-cat .env 2>/dev/null | grep DATABASE_URL
-
-# Extract host and port
-# Expected format: postgres://user:pass@host:port/dbname
-```
-
-### 2.2: Verify Database is Running
+The active `DATABASE_URL` in `.env` **must** point to Cloud SQL through the cloud-sql-proxy (port `15435`). A local PostgreSQL connection (port `5432`) is NOT acceptable for local deployment.
 
 ```bash
-# Check if PostgreSQL is running on the expected port
-PGPORT=$(cat .env 2>/dev/null | grep DATABASE_URL | grep -oE ':[0-9]+/' | tr -d ':/')
-echo "Expected PostgreSQL port: $PGPORT"
+# Read the active (uncommented) DATABASE_URL
+ACTIVE_DB_URL=$(grep '^DATABASE_URL=' .env | head -1 | cut -d= -f2-)
+echo "Active DATABASE_URL: $ACTIVE_DB_URL"
 
-# Is anything listening on that port?
-lsof -ti:$PGPORT 2>/dev/null && echo "Port $PGPORT: LISTENING" || echo "Port $PGPORT: NOTHING LISTENING"
-
-# Try a connection test
-psql "$(cat .env | grep '^DATABASE_URL=' | cut -d= -f2-)" -c "SELECT 1" 2>&1
+# Check if it points to Cloud SQL proxy (port 15435)
+if echo "$ACTIVE_DB_URL" | grep -qE ':15435/'; then
+  echo "OK: DATABASE_URL points to Cloud SQL (port 15435)"
+else
+  echo "FAIL: DATABASE_URL does NOT point to Cloud SQL."
+  echo "Expected port 15435 (cloud-sql-proxy), got: $ACTIVE_DB_URL"
+  echo "Switching to Cloud SQL connection..."
+fi
 ```
+
+**If DATABASE_URL is not pointing to Cloud SQL**, fix it:
+
+1. Comment out the local DATABASE_URL line
+2. Uncomment or set the Cloud SQL DATABASE_URL (port 15435 via cloud-sql-proxy)
+3. The Cloud SQL connection string format: `postgresql://<user>:<pass>@127.0.0.1:15435/<dbname>`
+4. Refer to the commented-out Cloud SQL lines in `.env` for the correct connection string
+
+```bash
+# Example fix — swap active DATABASE_URL to Cloud SQL:
+# Comment out local line, uncomment Cloud SQL line in .env
+# sed -i '' 's|^DATABASE_URL=postgres://intellirag.*localhost:5432|# LOCAL: &|' .env
+# sed -i '' 's|^# Cloud SQL.*DATABASE_URL=|DATABASE_URL=|' .env
+```
+
+**Gate: Do NOT proceed past Phase 2 if DATABASE_URL does not point to port 15435.**
+
+### 2.1: Verify cloud-sql-proxy is Running
+
+The Cloud SQL proxy must be running for the API to reach the database.
+
+```bash
+# Check if cloud-sql-proxy is running
+if pgrep -f "cloud-sql-proxy\|cloud_sql_proxy" >/dev/null 2>&1; then
+  echo "OK: cloud-sql-proxy is running"
+  ps aux | grep -E "cloud.sql.proxy" | grep -v grep
+else
+  echo "FAIL: cloud-sql-proxy is NOT running"
+  echo ""
+  echo "Start it with:"
+  echo '  cloud-sql-proxy "policing-apps:asia-southeast1:policing-db-v2" --port 15435 --gcloud-auth &'
+  echo ""
+  echo "Prerequisites:"
+  echo "  - gcloud auth login"
+  echo "  - gcloud auth application-default login"
+  echo "  - cloud-sql-proxy binary installed (brew install cloud-sql-proxy)"
+fi
+
+# Verify something is listening on port 15435
+lsof -ti:15435 2>/dev/null && echo "Port 15435: LISTENING" || echo "Port 15435: NOTHING LISTENING — start cloud-sql-proxy first"
+```
+
+**If cloud-sql-proxy is not running, report it as a P0 BLOCKER.** Provide the start command and stop — the user must start the proxy manually (it requires gcloud authentication).
+
+### 2.2: Test Cloud SQL Connection
+
+```bash
+# Try a connection test through cloud-sql-proxy
+ACTIVE_DB_URL=$(grep '^DATABASE_URL=' .env | head -1 | cut -d= -f2-)
+psql "$ACTIVE_DB_URL" -c "SELECT 1" 2>&1
+```
+
+If the connection fails, check in order:
+1. **cloud-sql-proxy not running** → start it (see 2.1)
+2. **Wrong credentials** → check the user/password in DATABASE_URL against Cloud SQL config
+3. **Wrong database name** → verify the database exists: `psql "$ACTIVE_DB_URL" -l`
+4. **gcloud auth expired** → `gcloud auth application-default login`
 
 ### 2.3: Fix Database Issues
 
 Common fixes (apply as needed):
 
-**Port mismatch** — .env points to Cloud SQL proxy port (5434) but local PostgreSQL is on 5432:
+**cloud-sql-proxy not running**:
 ```bash
-# Update .env to use local PostgreSQL port
-# Change DATABASE_URL port from 5434 to 5432
+# Start the proxy (requires gcloud auth)
+cloud-sql-proxy "policing-apps:asia-southeast1:policing-db-v2" --port 15435 --gcloud-auth &
+sleep 3
+lsof -ti:15435 && echo "Proxy started" || echo "Proxy failed to start"
 ```
 
-**Database doesn't exist**:
+**gcloud auth expired**:
 ```bash
-createdb -U <user> <dbname> 2>/dev/null
+gcloud auth application-default login
 ```
 
-**PostgreSQL not running**:
+**Database doesn't exist on Cloud SQL**:
 ```bash
-# macOS with brew
-brew services start postgresql@17
-# Or check for PostgreSQL in Docker
-docker ps | grep postgres
+# List available databases
+psql "$ACTIVE_DB_URL" -l 2>/dev/null
 ```
 
 ### 2.4: Verify Migrations are Applied
@@ -666,6 +720,7 @@ Commit:            <git commit hash>
 
 CHECKS:
   Package builds:     [PASS | FAIL]
+  Cloud SQL:          [PASS | FAIL — details]
   Database:           [PASS | FAIL — details]
   API startup:        [PASS | FAIL — details]
   Frontend startup:   [PASS | FAIL — details]
@@ -709,7 +764,10 @@ These are the most frequent issues discovered during local deployment. The phase
 |---|-------|-----------|-----|
 | 1 | `createXxx is not a function` | Stale workspace package dist/ | Rebuild: `npm run build:<package>` |
 | 2 | `EADDRINUSE` | Previous dev server still running | Kill: `lsof -ti:<port> \| xargs kill -9` |
-| 3 | `ECONNREFUSED` on DB queries | PostgreSQL not running or wrong port | Start PostgreSQL, fix .env port |
+| 3 | `ECONNREFUSED` on DB queries | cloud-sql-proxy not running or wrong port | Start cloud-sql-proxy on port 15435, verify DATABASE_URL |
+| 3a | DATABASE_URL points to local DB | .env has localhost:5432 instead of Cloud SQL :15435 | Switch DATABASE_URL to Cloud SQL connection string |
+| 3b | cloud-sql-proxy not running | Proxy process not started or crashed | `cloud-sql-proxy "policing-apps:asia-southeast1:policing-db-v2" --port 15435 --gcloud-auth &` |
+| 3c | gcloud auth expired | Application default credentials expired | `gcloud auth application-default login` |
 | 4 | 401 on all requests | Cookie auth without `credentials: "include"` | Add to all fetch calls |
 | 5 | 401 on public endpoints | Route under public prefix → auth middleware skipped → no user object | Move route out of public prefix, or remove auth check |
 | 6 | 403 FORBIDDEN on admin routes | Role names don't match (generic vs app-specific) | Pass app-specific `adminRoles` |
@@ -727,7 +785,7 @@ These are the most frequent issues discovered during local deployment. The phase
 
 | Severity | Issues |
 |----------|--------|
-| P0 | #2 (EADDRINUSE), #3 (ECONNREFUSED), #15 (tables missing) |
+| P0 | #2 (EADDRINUSE), #3 (ECONNREFUSED), #3a (wrong DB target), #3b (proxy not running), #15 (tables missing) |
 | P1 | #1 (stale dist), #4 (401 all requests), #5 (401 public), #6 (403), #7 (user undefined), #8 (column missing), #9 (UUID mismatch) |
 | P2 | #10 (feature flag), #11 (wrong port), #13 (LLM SQL), #14 (features missing) |
 | P3 | #12 (lockfile sync) |

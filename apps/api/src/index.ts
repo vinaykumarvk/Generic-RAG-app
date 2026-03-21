@@ -34,6 +34,34 @@ import { createIngestionRoutes } from "./routes/ingestion-routes";
 import { createWorkspaceMemberGuard } from "./middleware/workspace-guard";
 import { createStorageProvider } from "./storage";
 
+function isTruthy(value: string | undefined): boolean {
+  return value?.trim().toLowerCase() === "true";
+}
+
+function validateStorageSafety(): void {
+  const provider = (process.env.STORAGE_PROVIDER || "local").trim().toLowerCase();
+  if (provider !== "local") {
+    return;
+  }
+
+  if (isTruthy(process.env.ALLOW_LOCAL_STORAGE_SHARED_MOUNT) || isTruthy(process.env.ALLOW_LOCAL_STORAGE_WITH_PROD_DB)) {
+    return;
+  }
+
+  const databaseUrl = (process.env.DATABASE_URL || "").toLowerCase();
+  const looksLikeProductionDb = databaseUrl.includes("/police_kb")
+    || databaseUrl.includes("dbname=police_kb");
+
+  if (looksLikeProductionDb) {
+    throw new Error(
+      "Unsafe storage configuration: local filesystem storage against the production police_kb database " +
+      "can create document rows whose files exist only on the local machine. " +
+      "Use shared storage, or set ALLOW_LOCAL_STORAGE_SHARED_MOUNT=true for mounted shared storage " +
+      "or ALLOW_LOCAL_STORAGE_WITH_PROD_DB=true to override intentionally."
+    );
+  }
+}
+
 // FR-NFR: Env var validation at startup — fail hard on missing vars, never silently fallback
 function validateEnv(): void {
   const required = ["DATABASE_URL", "JWT_SECRET"];
@@ -45,6 +73,8 @@ function validateEnv(): void {
       `Ensure .env is loaded (use --env-file flag) or variables are exported in your shell.`
     );
   }
+
+  validateStorageSafety();
 
   logInfo("Environment validated", {
     DATABASE_URL: process.env.DATABASE_URL?.replace(/\/\/.*@/, "//<credentials>@"),
@@ -95,6 +125,54 @@ async function bootstrapAdmin(queryFn: (text: string, params?: unknown[]) => Pro
   }
 }
 
+// Bootstrap LLM providers: Qwen/OpenRouter as default, Gemini assigned to KG_EXTRACTION
+async function bootstrapProviders(queryFn: (text: string, params?: unknown[]) => Promise<{ rows: unknown[] }>): Promise<void> {
+  try {
+    const openRouterKey = process.env.OPENROUTER_API_KEY;
+    if (openRouterKey) {
+      const existing = await queryFn(
+        `SELECT config_id FROM llm_provider_config WHERE api_base_url LIKE '%openrouter%' LIMIT 1`,
+      );
+      if (existing.rows.length === 0) {
+        await queryFn(`UPDATE llm_provider_config SET is_default = FALSE WHERE is_default = TRUE`);
+        await queryFn(
+          `INSERT INTO llm_provider_config
+             (provider, display_name, api_base_url, api_key_enc, model_id,
+              is_active, is_default, max_tokens, temperature, timeout_ms, max_retries, config_jsonb)
+           VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, 4096, 0.3, 60000, 2, $6::jsonb)`,
+          [
+            "openai", "Qwen 3.5 35B (OpenRouter)",
+            "https://openrouter.ai/api/v1", openRouterKey,
+            "qwen/qwen3.5-35b-a3b",
+            JSON.stringify({ input_cost_per_million: 0.1625, output_cost_per_million: 1.30 }),
+          ],
+        );
+        logInfo("Bootstrap: Qwen/OpenRouter provider created as default");
+      }
+    }
+
+    // Assign Gemini provider to KG_EXTRACTION if not already assigned
+    const gemini = await queryFn(
+      `SELECT config_id, config_jsonb FROM llm_provider_config WHERE provider = 'gemini' AND is_active = TRUE LIMIT 1`,
+    );
+    if (gemini.rows.length > 0) {
+      const row = gemini.rows[0] as { config_id: string; config_jsonb: Record<string, unknown> };
+      const useCases = (row.config_jsonb?.assigned_use_cases as string[]) || [];
+      if (!useCases.includes("KG_EXTRACTION")) {
+        await queryFn(
+          `UPDATE llm_provider_config
+           SET config_jsonb = config_jsonb || '{"assigned_use_cases": ["KG_EXTRACTION"]}'::jsonb
+           WHERE config_id = $1`,
+          [row.config_id],
+        );
+        logInfo("Bootstrap: Gemini provider assigned to KG_EXTRACTION");
+      }
+    }
+  } catch (err) {
+    logWarn("Bootstrap providers check failed (non-fatal)", { error: String(err) });
+  }
+}
+
 async function main() {
   validateEnv();
 
@@ -136,6 +214,9 @@ async function main() {
   // Bootstrap admin if no admin exists (FR-001)
   await bootstrapAdmin(queryFn);
 
+  // Bootstrap LLM providers (Qwen/OpenRouter default, Gemini → KG_EXTRACTION)
+  await bootstrapProviders(queryFn);
+
   const llmProvider = createLlmProvider({ queryFn });
 
   const authMiddleware = createAuthMiddleware({
@@ -170,8 +251,8 @@ async function main() {
     domainRoutes: async (app) => {
       const storageProvider = createStorageProvider();
       const deps = { queryFn, getClient, llmProvider, storageProvider };
-      // FR-004: Increase bodyLimit to 200MB
-      await app.register(import("@fastify/multipart"), { limits: { fileSize: 209_715_200 } });
+      // FR-004: Increase bodyLimit to 250MB
+      await app.register(import("@fastify/multipart"), { limits: { fileSize: 262_144_000 } });
 
       // Auth routes (login, logout, me, refresh)
       const authRoutes = createAuthRoutes({ queryFn, auth: authMiddleware });

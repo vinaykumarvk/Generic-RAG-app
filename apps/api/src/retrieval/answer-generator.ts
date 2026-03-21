@@ -1,7 +1,7 @@
 /**
  * Answer generation — LLM call with retrieved chunks as context + citation extraction.
  * FR-014: preset-based word/token limits, model routing, source references.
- * FR-015: References section, max 10 references.
+ * FR-015: Structured references are carried separately in citations.
  * FR-016: Brief/detailed format instructions, caution language, filter suggestions.
  */
 
@@ -29,6 +29,9 @@ export interface GeneratedAnswer {
   followUpQuestions: string[];
   provider: string;
   model: string;
+  promptTokens?: number;
+  outputTokens?: number;
+  costUsd?: number;
   latencyMs: number;
 }
 
@@ -192,22 +195,15 @@ RULES:
       };
     });
 
-  // Append References section (FR-015/AC-01)
-  let answerWithRefs = answerContent;
-  if (citations.length > 0) {
-    const refLines = citations.map((c) => {
-      const page = c.page_number ? `, Page ${c.page_number}` : "";
-      return `[${c.citation_index}] ${c.document_title}${page}`;
-    });
-    answerWithRefs += `\n\n**References**\n${refLines.join("\n")}`;
-  }
-
   return {
-    answer: answerWithRefs,
+    answer: answerContent,
     citations,
     followUpQuestions: followUpQuestions.slice(0, 3),
     provider: result.provider,
     model: result.model,
+    promptTokens: result.promptTokens,
+    outputTokens: result.outputTokens,
+    costUsd: result.costUsd,
     latencyMs: Date.now() - start,
   };
 }

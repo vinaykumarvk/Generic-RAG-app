@@ -100,6 +100,7 @@ export interface LlmCompletionResponse {
   model: string;
   promptTokens?: number;
   outputTokens?: number;
+  costUsd?: number;
   latencyMs: number;
   fallbackUsed: boolean;
 }
@@ -560,9 +561,37 @@ export function createLlmProvider(deps: LlmProviderDeps): LlmProvider {
   let cacheExpiry = 0;
   const CACHE_TTL_MS = 60_000;
 
+  // Use-case-specific provider cache (keyed by use case)
+  const useCaseCache: Record<string, { config: LlmProviderConfig; expiry: number }> = {};
+
   function invalidateProviderCache() {
     cachedConfig = null;
     cacheExpiry = 0;
+    for (const key of Object.keys(useCaseCache)) {
+      delete useCaseCache[key];
+    }
+  }
+
+  async function loadConfigForUseCase(useCase: string): Promise<LlmProviderConfig | null> {
+    const cached = useCaseCache[useCase];
+    if (cached && Date.now() < cached.expiry) return cached.config;
+
+    try {
+      const res = await queryFn(
+        `SELECT * FROM llm_provider_config
+         WHERE is_active = TRUE AND config_jsonb->'assigned_use_cases' ? $1
+         LIMIT 1`,
+        [useCase],
+      );
+      if (res.rows.length > 0) {
+        const config = res.rows[0] as unknown as LlmProviderConfig;
+        useCaseCache[useCase] = { config, expiry: Date.now() + CACHE_TTL_MS };
+        return config;
+      }
+    } catch {
+      // Table may not exist yet or column missing
+    }
+    return null;
   }
 
   async function loadDefaultConfig(): Promise<LlmProviderConfig | null> {
@@ -668,7 +697,14 @@ export function createLlmProvider(deps: LlmProviderDeps): LlmProvider {
 
   // ── Core Completion ──────────────────────────────────────────────────────
   async function llmComplete(request: LlmCompletionRequest): Promise<LlmCompletionResponse | null> {
-    const baseConfig = await loadDefaultConfig();
+    // Check for use-case-specific provider first, then fall back to default
+    let baseConfig: LlmProviderConfig | null = null;
+    if (request.useCase) {
+      baseConfig = await loadConfigForUseCase(request.useCase);
+    }
+    if (!baseConfig) {
+      baseConfig = await loadDefaultConfig();
+    }
     if (!baseConfig) return null;
 
     const config = request.modelOverride
@@ -710,9 +746,17 @@ export function createLlmProvider(deps: LlmProviderDeps): LlmProvider {
       const parsed = adapter.parseResponse(json);
       recordSuccess(host);
 
+      // Calculate cost from token counts + pricing in config_jsonb
+      const inputCostPerM = config.config_jsonb?.input_cost_per_million as number | undefined;
+      const outputCostPerM = config.config_jsonb?.output_cost_per_million as number | undefined;
+      let costUsd: number | undefined;
+      if (inputCostPerM != null && outputCostPerM != null && parsed.promptTokens && parsed.outputTokens) {
+        costUsd = (parsed.promptTokens * inputCostPerM + parsed.outputTokens * outputCostPerM) / 1_000_000;
+      }
+
       const response: LlmCompletionResponse = {
-        content: parsed.content, provider: config.provider, model: config.model_id,
-        promptTokens: parsed.promptTokens, outputTokens: parsed.outputTokens,
+        content: parsed.content, provider: config.display_name || config.provider, model: config.model_id,
+        promptTokens: parsed.promptTokens, outputTokens: parsed.outputTokens, costUsd,
         latencyMs: Date.now() - start, fallbackUsed: false,
       };
       logPrediction(response, request);
@@ -721,7 +765,7 @@ export function createLlmProvider(deps: LlmProviderDeps): LlmProvider {
     } catch (err) {
       recordFailure(host);
       logError("LLM completion failed", { provider: config.provider, model: config.model_id, error: err instanceof Error ? err.message : String(err) });
-      logPrediction({ content: "", provider: config.provider, model: config.model_id, latencyMs: Date.now() - start, fallbackUsed: true }, request);
+      logPrediction({ content: "", provider: config.display_name || config.provider, model: config.model_id, latencyMs: Date.now() - start, fallbackUsed: true }, request);
       return null;
     }
   }

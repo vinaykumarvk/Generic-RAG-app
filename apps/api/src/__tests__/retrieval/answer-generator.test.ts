@@ -62,6 +62,7 @@ describe("generateAnswer", () => {
       expect(result).not.toBeNull();
       expect(result!.answer).toContain("[1]");
       expect(result!.answer).toContain("[2]");
+      expect(result!.answer).not.toContain("References");
       expect(result!.citations).toHaveLength(2);
 
       // Citation 1 maps to first chunk

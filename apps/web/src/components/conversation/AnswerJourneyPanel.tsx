@@ -359,7 +359,10 @@ function renderStepBody(step: JourneyStep, trace: JourneyTrace): ReactNode {
         <div className="space-y-4">
           <Section title="Answer">
             <div className="rounded-lg border border-skin bg-surface p-3">
-              <MarkdownContent content={typeof payload.answer === "string" ? payload.answer : trace.answer} />
+              <MarkdownContent
+                content={typeof payload.answer === "string" ? payload.answer : trace.answer}
+                stripTrailingReferences={(trace.citations.length > 0 ? trace.citations : asCitationArray(payload.citations)).length > 0}
+              />
             </div>
           </Section>
           <Section title="Citations">

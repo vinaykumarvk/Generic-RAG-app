@@ -113,7 +113,7 @@ export function createAdminRoutes(app: FastifyInstance, deps: AdminRouteDeps) {
     await queryFn("DELETE FROM system_setting");
     await queryFn(`
       INSERT INTO system_setting (key, category, value, value_type, description) VALUES
-        ('max_file_size_bytes', 'storage', '104857600', 'number', 'Maximum file upload size in bytes (100MB)'),
+        ('max_file_size_bytes', 'storage', '262144000', 'number', 'Maximum file upload size in bytes (250MB)'),
         ('storage_provider', 'storage', 'local', 'string', 'Storage provider: local or gcs'),
         ('gcs_bucket', 'storage', '', 'string', 'GCS bucket name'),
         ('chunk_size_tokens', 'chunking', '512', 'number', 'Target chunk size in tokens'),
@@ -142,11 +142,12 @@ export function createAdminRoutes(app: FastifyInstance, deps: AdminRouteDeps) {
   });
 
   // GET /admin/ingestion/volume — refresh and return materialized view data
-  app.get<{ Params: { wid: string } }>("/api/v1/workspaces/:wid/admin/ingestion-volume", async (request, reply) => {
+  app.get<{ Params: { wid: string }; Querystring: { days?: string } }>("/api/v1/workspaces/:wid/admin/ingestion-volume", async (request, reply) => {
     const denied = requireAdmin(request, reply);
     if (denied) return denied;
 
     const { wid } = request.params;
+    const days = Math.min(90, Math.max(1, parseInt(request.query.days || "30", 10)));
 
     try {
       await queryFn("REFRESH MATERIALIZED VIEW CONCURRENTLY v_ingestion_volume");
@@ -155,14 +156,19 @@ export function createAdminRoutes(app: FastifyInstance, deps: AdminRouteDeps) {
     }
 
     const result = await queryFn(
-      `SELECT day, doc_count, total_bytes, active_count, failed_count, searchable_count
+      `SELECT day,
+              doc_count::int AS upload_count,
+              total_bytes::bigint AS total_bytes,
+              active_count::int AS active_count,
+              failed_count::int AS failed_count,
+              searchable_count::int AS searchable_count
        FROM v_ingestion_volume
        WHERE workspace_id = $1
-       ORDER BY day DESC
-       LIMIT 90`,
-      [wid]
+         AND day >= date_trunc('day', now()) - ($2::int - 1) * interval '1 day'
+       ORDER BY day ASC`,
+      [wid, days]
     );
 
-    return { volume: result.rows };
+    return { period_days: days, data: result.rows, volume: result.rows };
   });
 }

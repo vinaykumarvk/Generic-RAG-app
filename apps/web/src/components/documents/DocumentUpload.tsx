@@ -1,16 +1,22 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Upload, X, FileText, Loader2, FolderOpen, AlertCircle, CheckCircle } from "lucide-react";
+import { Upload, X, FileText, Loader2, FolderOpen, AlertCircle, CheckCircle, RotateCcw } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { apiFetch, apiUpload } from "@/lib/api";
+import { apiFetch, apiUpload, setUploadInProgress, startSessionKeepalive, stopSessionKeepalive, refreshSession } from "@/lib/api";
 
 const SUPPORTED_EXTENSIONS = [
   ".pdf", ".docx", ".xlsx", ".txt", ".md", ".csv", ".doc", ".xls",
   ".jpg", ".jpeg", ".png", ".tiff", ".bmp", ".gif", ".webp",
 ];
 const MAX_FILES = 100;
+const MAX_FILE_SIZE_BYTES = 250 * 1024 * 1024; // 250MB
 const HIDDEN_FILES = [".DS_Store", "Thumbs.db", "desktop.ini"];
 const MAX_CONCURRENT = 4;
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
 
 interface FileWithMeta {
   file: File;
@@ -77,12 +83,35 @@ export function DocumentUpload({ workspaceId }: DocumentUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [duplicateFile, setDuplicateFile] = useState<{ file: File; meta?: Omit<FileWithMeta, "file"> } | null>(null);
+  const [oversizedFiles, setOversizedFiles] = useState<{ name: string; size: number }[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const qc = useQueryClient();
 
   const isFolderMode = folderFiles.length > 0;
   const isUploading = uploadProgress !== null && uploadProgress.completed < uploadProgress.total;
+
+  // Navigation protection: warn before leaving during active uploads
+  useEffect(() => {
+    if (!isUploading) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isUploading]);
+
+  const invalidateWorkspaceViews = useCallback(async () => {
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ["documents", workspaceId] }),
+      qc.invalidateQueries({ queryKey: ["analytics", workspaceId] }),
+      qc.invalidateQueries({ queryKey: ["analytics-export", workspaceId] }),
+      qc.invalidateQueries({ queryKey: ["ingestion-volume", workspaceId] }),
+      qc.invalidateQueries({ queryKey: ["workspace-kpi", workspaceId] }),
+      qc.invalidateQueries({ queryKey: ["workspaces", workspaceId] }),
+      qc.invalidateQueries({ queryKey: ["workspaces"] }),
+    ]);
+  }, [qc, workspaceId]);
 
   const uploadFile = (
     file: File,
@@ -128,6 +157,12 @@ export function DocumentUpload({ workspaceId }: DocumentUploadProps) {
         return await uploadFile(file, meta, onProgress);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed";
+        // On session expiry, attempt token refresh then retry once
+        if (message === "SESSION_EXPIRED") {
+          const refreshed = await refreshSession();
+          if (refreshed) continue; // retry same attempt (don't increment)
+          throw err; // refresh failed — bubble up
+        }
         // Don't retry on duplicate or client errors
         if (message === "DUPLICATE_DETECTED" || attempt === MAX_RETRIES) throw err;
         const delay = BASE_DELAY_MS * Math.pow(2, attempt);
@@ -141,8 +176,13 @@ export function DocumentUpload({ workspaceId }: DocumentUploadProps) {
     e.preventDefault();
     setIsDragging(false);
     const droppedFiles = Array.from(e.dataTransfer.files);
+    const oversized = droppedFiles.filter((f) => f.size > MAX_FILE_SIZE_BYTES);
+    const validFiles = droppedFiles.filter((f) => f.size <= MAX_FILE_SIZE_BYTES);
+    if (oversized.length > 0) {
+      setOversizedFiles(oversized.map((f) => ({ name: f.name, size: f.size })));
+    }
     setFiles((prev) => {
-      const combined = [...prev, ...droppedFiles];
+      const combined = [...prev, ...validFiles];
       return combined.slice(0, MAX_FILES);
     });
   }, []);
@@ -150,7 +190,12 @@ export function DocumentUpload({ workspaceId }: DocumentUploadProps) {
   const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files || []);
     const supported = selected.filter(isSupported);
-    const withMeta = supported.map((file) => ({
+    const oversized = supported.filter((f) => f.size > MAX_FILE_SIZE_BYTES);
+    const validFiles = supported.filter((f) => f.size <= MAX_FILE_SIZE_BYTES);
+    if (oversized.length > 0) {
+      setOversizedFiles(oversized.map((f) => ({ name: f.name, size: f.size })));
+    }
+    const withMeta = validFiles.map((file) => ({
       file,
       ...extractFolderMetadata(file),
     }));
@@ -163,35 +208,48 @@ export function DocumentUpload({ workspaceId }: DocumentUploadProps) {
     const progress: UploadProgress = { total: files.length, completed: 0, inProgress: [], errors: [], fileProgress };
     setUploadProgress({ ...progress });
 
-    const queue = files.map((f, i) => ({ file: f, index: i }));
-    const run = async () => {
-      while (queue.length > 0) {
-        const item = queue.shift()!;
-        progress.inProgress.push(item.file.name);
-        progress.fileProgress[item.index].status = "uploading";
-        setUploadProgress({ ...progress });
-        try {
-          await uploadFileWithRetry(item.file, undefined, (pct) => {
-            progress.fileProgress[item.index].percent = pct;
-            setUploadProgress({ ...progress });
-          });
-          progress.fileProgress[item.index].status = "done";
-          progress.fileProgress[item.index].percent = 100;
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "Failed";
-          progress.errors.push({ name: item.file.name, error: msg });
-          progress.fileProgress[item.index].status = "error";
-          progress.fileProgress[item.index].error = msg;
+    setUploadInProgress(true);
+    startSessionKeepalive();
+    try {
+      const queue = files.map((f, i) => ({ file: f, index: i }));
+      const run = async () => {
+        while (queue.length > 0) {
+          const item = queue.shift()!;
+          progress.inProgress.push(item.file.name);
+          progress.fileProgress[item.index].status = "uploading";
+          setUploadProgress({ ...progress });
+          try {
+            await uploadFileWithRetry(item.file, undefined, (pct) => {
+              progress.fileProgress[item.index].percent = pct;
+              setUploadProgress({ ...progress });
+            });
+            progress.fileProgress[item.index].status = "done";
+            progress.fileProgress[item.index].percent = 100;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed";
+            progress.errors.push({ name: item.file.name, error: msg });
+            progress.fileProgress[item.index].status = "error";
+            progress.fileProgress[item.index].error = msg;
+          }
+          progress.inProgress = progress.inProgress.filter((n) => n !== item.file.name);
+          progress.completed++;
+          setUploadProgress({ ...progress });
         }
-        progress.inProgress = progress.inProgress.filter((n) => n !== item.file.name);
-        progress.completed++;
-        setUploadProgress({ ...progress });
-      }
-    };
+      };
 
-    await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT, files.length) }, () => run()));
-    qc.invalidateQueries({ queryKey: ["documents", workspaceId] });
-    setFiles([]);
+      await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT, files.length) }, () => run()));
+    } finally {
+      stopSessionKeepalive();
+      setUploadInProgress(false);
+    }
+    await invalidateWorkspaceViews();
+    // Keep failed files for retry — only clear successful ones
+    if (progress.errors.length > 0) {
+      const failedNames = new Set(progress.errors.map((e) => e.name));
+      setFiles((prev) => prev.filter((f) => failedNames.has(f.name)));
+    } else {
+      setFiles([]);
+    }
   };
 
   const handleUploadFolder = async () => {
@@ -199,41 +257,61 @@ export function DocumentUpload({ workspaceId }: DocumentUploadProps) {
     const progress: UploadProgress = { total: folderFiles.length, completed: 0, inProgress: [], errors: [], fileProgress };
     setUploadProgress({ ...progress });
 
-    const queue = folderFiles.map((f, i) => ({ item: f, index: i }));
-    const run = async () => {
-      while (queue.length > 0) {
-        const entry = queue.shift()!;
-        progress.inProgress.push(entry.item.file.name);
-        progress.fileProgress[entry.index].status = "uploading";
-        setUploadProgress({ ...progress });
-        try {
-          await uploadFileWithRetry(entry.item.file, entry.item, (pct) => {
-            progress.fileProgress[entry.index].percent = pct;
-            setUploadProgress({ ...progress });
-          });
-          progress.fileProgress[entry.index].status = "done";
-          progress.fileProgress[entry.index].percent = 100;
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "Failed";
-          progress.errors.push({ name: entry.item.file.name, error: msg });
-          progress.fileProgress[entry.index].status = "error";
-          progress.fileProgress[entry.index].error = msg;
+    setUploadInProgress(true);
+    startSessionKeepalive();
+    try {
+      const queue = folderFiles.map((f, i) => ({ item: f, index: i }));
+      const run = async () => {
+        while (queue.length > 0) {
+          const entry = queue.shift()!;
+          progress.inProgress.push(entry.item.file.name);
+          progress.fileProgress[entry.index].status = "uploading";
+          setUploadProgress({ ...progress });
+          try {
+            await uploadFileWithRetry(entry.item.file, entry.item, (pct) => {
+              progress.fileProgress[entry.index].percent = pct;
+              setUploadProgress({ ...progress });
+            });
+            progress.fileProgress[entry.index].status = "done";
+            progress.fileProgress[entry.index].percent = 100;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed";
+            progress.errors.push({ name: entry.item.file.name, error: msg });
+            progress.fileProgress[entry.index].status = "error";
+            progress.fileProgress[entry.index].error = msg;
+          }
+          progress.inProgress = progress.inProgress.filter((n) => n !== entry.item.file.name);
+          progress.completed++;
+          setUploadProgress({ ...progress });
         }
-        progress.inProgress = progress.inProgress.filter((n) => n !== entry.item.file.name);
-        progress.completed++;
-        setUploadProgress({ ...progress });
-      }
-    };
+      };
 
-    await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT, folderFiles.length) }, () => run()));
-    qc.invalidateQueries({ queryKey: ["documents", workspaceId] });
-    setFolderFiles([]);
+      await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT, folderFiles.length) }, () => run()));
+    } finally {
+      stopSessionKeepalive();
+      setUploadInProgress(false);
+    }
+    await invalidateWorkspaceViews();
+    // Keep failed files for retry — only clear successful ones
+    if (progress.errors.length > 0) {
+      const failedNames = new Set(progress.errors.map((e) => e.name));
+      setFolderFiles((prev) => prev.filter((f) => failedNames.has(f.file.name)));
+    } else {
+      setFolderFiles([]);
+    }
+  };
+
+  const handleRetryFailed = () => {
+    setUploadProgress(null);
+    // files/folderFiles already contain only the failed items (kept from previous upload)
+    // User clicks the normal upload button again to re-upload
   };
 
   const handleCancel = () => {
     setFiles([]);
     setFolderFiles([]);
     setUploadProgress(null);
+    setOversizedFiles([]);
   };
 
   return (
@@ -253,7 +331,7 @@ export function DocumentUpload({ workspaceId }: DocumentUploadProps) {
           <p className="text-sm text-text-secondary">
             Drag & drop files here, or <span className="text-primary-600 font-medium">click to browse</span>
           </p>
-          <p className="text-xs text-text-tertiary mt-1">PDF, DOCX, XLSX, TXT, MD, CSV, images — up to 100MB (max {MAX_FILES} files)</p>
+          <p className="text-xs text-text-tertiary mt-1">PDF, DOCX, XLSX, TXT, MD, CSV, images — up to 250MB (max {MAX_FILES} files)</p>
           {/* FR-016/AC-02: Always-visible Browse Files button */}
           <button
             type="button"
@@ -267,7 +345,12 @@ export function DocumentUpload({ workspaceId }: DocumentUploadProps) {
             type="file"
             multiple
             accept=".pdf,.docx,.doc,.xlsx,.xls,.txt,.md,.csv,.jpg,.jpeg,.png,.tiff,.bmp,.gif,.webp"
-            onChange={(e) => setFiles((prev) => [...prev, ...Array.from(e.target.files || [])].slice(0, MAX_FILES))}
+            onChange={(e) => {
+              const newFiles = Array.from(e.target.files || []);
+              const oversized = newFiles.filter((f) => f.size > MAX_FILE_SIZE_BYTES);
+              if (oversized.length > 0) setOversizedFiles(oversized.map((f) => ({ name: f.name, size: f.size })));
+              setFiles((prev) => [...prev, ...newFiles.filter((f) => f.size <= MAX_FILE_SIZE_BYTES)].slice(0, MAX_FILES));
+            }}
             className="hidden"
           />
         </div>
@@ -288,6 +371,28 @@ export function DocumentUpload({ workspaceId }: DocumentUploadProps) {
           />
         </button>
       </div>
+
+      {/* Oversized files warning */}
+      {oversizedFiles.length > 0 && (
+        <div className="flex items-start gap-2 p-3 rounded-lg bg-warning/10 border border-warning/30">
+          <AlertCircle size={16} className="text-warning shrink-0 mt-0.5" aria-hidden="true" />
+          <div className="flex-1 text-sm">
+            <p className="font-medium text-warning">{oversizedFiles.length} file{oversizedFiles.length > 1 ? "s" : ""} excluded (exceeds 250 MB limit)</p>
+            <ul className="mt-1 text-xs text-text-secondary space-y-0.5">
+              {oversizedFiles.map((f) => (
+                <li key={f.name}>{f.name} ({formatFileSize(f.size)})</li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              onClick={() => setOversizedFiles([])}
+              className="text-xs text-text-tertiary hover:text-text-primary mt-1"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Folder preview table */}
       {isFolderMode && !isUploading && (
@@ -474,9 +579,24 @@ export function DocumentUpload({ workspaceId }: DocumentUploadProps) {
             </div>
           )}
           {uploadProgress.completed === uploadProgress.total && (
-            <button type="button" onClick={() => setUploadProgress(null)} className="text-xs text-text-tertiary hover:text-text-primary mt-1">
-              Dismiss
-            </button>
+            <div className="flex items-center gap-3 mt-1">
+              {uploadProgress.errors.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleRetryFailed}
+                  className="flex items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700"
+                >
+                  <RotateCcw size={12} aria-hidden="true" />
+                  Retry {uploadProgress.errors.length} failed file{uploadProgress.errors.length > 1 ? "s" : ""}
+                </button>
+              )}
+              <button type="button" onClick={() => setUploadProgress(null)} className="text-xs text-text-tertiary hover:text-text-primary">
+                Dismiss
+              </button>
+              <button type="button" onClick={handleCancel} className="text-xs text-text-tertiary hover:text-text-primary">
+                Clear all
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -510,7 +630,7 @@ export function DocumentUpload({ workspaceId }: DocumentUploadProps) {
                 method: "POST",
                 body: formData,
               });
-              qc.invalidateQueries({ queryKey: ["documents", workspaceId] });
+              await invalidateWorkspaceViews();
             } catch {
               // Non-critical
             }

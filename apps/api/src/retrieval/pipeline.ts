@@ -75,6 +75,9 @@ export interface PipelineResult {
   retrieval_run_id?: string;
   model_provider?: string;
   model_id?: string;
+  prompt_tokens?: number;
+  output_tokens?: number;
+  cost_usd?: number;
   title?: string;
   follow_up_questions?: string[];
   citations: Array<{
@@ -1234,6 +1237,9 @@ export async function executeRetrievalPipeline(
     retrieval_run_id: retrievalRunId,
     model_provider: genResult.provider,
     model_id: genResult.model,
+    prompt_tokens: genResult.promptTokens,
+    output_tokens: genResult.outputTokens,
+    cost_usd: genResult.costUsd,
     title: generatedTitle,
     follow_up_questions: genResult.followUpQuestions.length > 0 ? genResult.followUpQuestions : undefined,
     citations: genResult.citations.map((c) => ({

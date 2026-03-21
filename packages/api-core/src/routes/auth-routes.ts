@@ -70,6 +70,66 @@ export function createAuthRoutes(deps: AuthRouteDeps) {
       return { user: result.user };
     });
 
+    app.post("/api/v1/auth/refresh", {
+      config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
+      schema: { body: { type: "object", additionalProperties: false, properties: {} } },
+    }, async (request, reply) => {
+      const cookieName = process.env.AUTH_COOKIE_NAME || "intellirag_session";
+      const token = request.cookies?.[cookieName];
+      if (!token) {
+        return sendError(reply, 401, "NO_TOKEN", "No session token found");
+      }
+
+      // Try normal verify first, then decode with 5-min grace for just-expired tokens
+      let payload = auth.verifyToken(token);
+      if (!payload) {
+        const decoded = jwt.decode(token) as { exp?: number; userId?: string; userType?: string; roles?: string[]; jti?: string; unitId?: string | null } | null;
+        if (!decoded?.exp || !decoded.userId) {
+          return sendError(reply, 401, "INVALID_TOKEN", "Token is invalid");
+        }
+        const expiredAgoMs = Date.now() - decoded.exp * 1000;
+        if (expiredAgoMs > 5 * 60 * 1000) {
+          return sendError(reply, 401, "TOKEN_EXPIRED", "Token expired beyond grace period");
+        }
+        payload = {
+          userId: decoded.userId,
+          userType: decoded.userType || "",
+          roles: decoded.roles || [],
+          jti: decoded.jti || "",
+          unitId: decoded.unitId || null,
+        };
+      }
+
+      // Confirm user is still active
+      const userResult = await queryFn(
+        `SELECT user_id, user_type, unit_id, is_active FROM user_account WHERE user_id = $1`,
+        [payload.userId]
+      );
+      if (userResult.rows.length === 0 || !userResult.rows[0].is_active) {
+        auth.clearAuthCookie(reply);
+        return sendError(reply, 401, "USER_INACTIVE", "User account is no longer active");
+      }
+
+      // Revoke old token
+      if (payload.jti) {
+        const decoded = jwt.decode(token) as { exp?: number } | null;
+        if (decoded?.exp) {
+          await auth.revokeToken(payload.jti, payload.userId, new Date(decoded.exp * 1000));
+        }
+      }
+
+      // Fetch current roles and issue new token
+      const rolesResult = await queryFn(
+        `SELECT r.role_key FROM user_role ur JOIN role r ON r.role_id = ur.role_id WHERE ur.user_id = $1`,
+        [payload.userId]
+      );
+      const roles = rolesResult.rows.map((r: { role_key: string }) => r.role_key);
+      const dbUser = userResult.rows[0];
+      const newToken = auth.generateToken({ user_id: dbUser.user_id, user_type: dbUser.user_type, roles, unit_id: dbUser.unit_id });
+      auth.setAuthCookie(reply, newToken);
+      return { success: true };
+    });
+
     app.post("/api/v1/auth/logout", {
       schema: { body: { type: "object", additionalProperties: false, properties: {} } },
     }, async (request, reply) => {

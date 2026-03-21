@@ -6,18 +6,33 @@ interface MarkdownContentProps {
   content: string;
   citationMap?: Record<number, number>;
   showInlineCitations?: boolean;
+  stripTrailingReferences?: boolean;
+}
+
+function stripTrailingReferencesSection(raw: string): string {
+  const trailingRefs = /(?:^|\n{2,})(?:\*\*References\*\*|References)\b[\s\S]*$/i;
+  const match = raw.match(trailingRefs);
+  if (!match || match.index < 0) return raw;
+
+  const candidate = raw.slice(match.index);
+  const looksLikeCitationBlock = /(?:\[\d+\]|page\s+\d+|\.pdf\b|\.docx?\b|\.xlsx?\b|\.txt\b|\.md\b)/i.test(candidate);
+  if (!looksLikeCitationBlock) return raw;
+
+  return raw.slice(0, match.index).trimEnd();
 }
 
 function processContent(
   raw: string,
   citationMap?: Record<number, number>,
   showInline?: boolean,
+  stripTrailingReferences?: boolean,
 ): string {
+  const normalized = stripTrailingReferences ? stripTrailingReferencesSection(raw) : raw;
   if (!showInline) {
-    return raw.replace(/\[\d+\]/g, "");
+    return normalized.replace(/\[\d+\]/g, "");
   }
-  if (!citationMap) return raw;
-  return raw.replace(/\[(\d+)\]/g, (_, n) => {
+  if (!citationMap) return normalized;
+  return normalized.replace(/\[(\d+)\]/g, (_, n) => {
     const mapped = citationMap[parseInt(n, 10)];
     return mapped ? `[${mapped}]` : "";
   });
@@ -109,10 +124,10 @@ function isSimpleMarkdownTable(table: ParsedMarkdownTable | null): table is Pars
   return !!table && table.headers.length > 0 && table.headers.length <= 3;
 }
 
-export function MarkdownContent({ content, citationMap, showInlineCitations }: MarkdownContentProps) {
+export function MarkdownContent({ content, citationMap, showInlineCitations, stripTrailingReferences }: MarkdownContentProps) {
   const processed = useMemo(
-    () => processContent(content, citationMap, showInlineCitations),
-    [content, citationMap, showInlineCitations],
+    () => processContent(content, citationMap, showInlineCitations, stripTrailingReferences),
+    [content, citationMap, showInlineCitations, stripTrailingReferences],
   );
 
   return (

@@ -43,6 +43,9 @@ interface QueryResult {
   citations: Citation[];
   model_provider?: string;
   model_id?: string;
+  prompt_tokens?: number;
+  output_tokens?: number;
+  cost_usd?: number;
   title?: string;
   follow_up_questions?: string[];
   retrieval: {
@@ -305,6 +308,7 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
                   content={msg.content}
                   citationMap={msg.citations ? buildRenumberMap(msg.citations) : undefined}
                   showInlineCitations={showInlineCitations}
+                  stripTrailingReferences={!!msg.citations?.length}
                 />
               ) : (
                 <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
@@ -326,11 +330,11 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
 
                   {/* Badges + actions row */}
                   <div className="flex items-center gap-2 mt-2 flex-wrap">
-                    {/* Model badge */}
-                    {msg.model_provider && (
+                    {/* Model badge — show provider display name + model ID */}
+                    {(msg.model_provider || msg.model_id) && (
                       <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-surface text-skin-muted">
                         <Cpu size={10} aria-hidden="true" />
-                        {msg.model_provider}{msg.model_id ? `/${msg.model_id}` : ""}
+                        {msg.model_provider || ""}{msg.model_id ? ` · ${msg.model_id}` : ""}
                       </span>
                     )}
 
@@ -345,6 +349,15 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
                     {/* Latency */}
                     {msg.latency_ms && (
                       <span className="text-xs text-skin-muted">{msg.latency_ms}ms</span>
+                    )}
+
+                    {/* Cost — shown for the current query result's message */}
+                    {queryMutation.data?.messageId === msg.message_id && queryMutation.data.cost_usd != null && (
+                      <span className="text-xs text-skin-muted">
+                        ${queryMutation.data.cost_usd < 0.01
+                          ? queryMutation.data.cost_usd.toFixed(4)
+                          : queryMutation.data.cost_usd.toFixed(3)}
+                      </span>
                     )}
 
                     <div className="flex-1" />
@@ -526,6 +539,7 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
                 content={lastResult.answer}
                 citationMap={lastResult.citations ? buildRenumberMap(lastResult.citations) : undefined}
                 showInlineCitations={showInlineCitations}
+                stripTrailingReferences={!!lastResult.citations?.length}
               />
               {lastResult.citations && lastResult.citations.length > 0 && (
                 <ReferencesSection
@@ -536,6 +550,23 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
                   onCitationClick={(c) => setPreviewCitation(c)}
                 />
               )}
+              {/* Model + cost badges for optimistic answer */}
+              <div className="flex items-center gap-2 mt-2 flex-wrap">
+                {(lastResult.model_provider || lastResult.model_id) && (
+                  <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-surface text-skin-muted">
+                    <Cpu size={10} aria-hidden="true" />
+                    {lastResult.model_provider || ""}{lastResult.model_id ? ` · ${lastResult.model_id}` : ""}
+                  </span>
+                )}
+                {lastResult.retrieval?.total_latency_ms && (
+                  <span className="text-xs text-skin-muted">{lastResult.retrieval.total_latency_ms}ms</span>
+                )}
+                {lastResult.cost_usd != null && (
+                  <span className="text-xs text-skin-muted">
+                    ${lastResult.cost_usd < 0.01 ? lastResult.cost_usd.toFixed(4) : lastResult.cost_usd.toFixed(3)}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         )}

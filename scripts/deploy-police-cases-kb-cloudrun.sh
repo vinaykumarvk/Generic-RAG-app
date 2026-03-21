@@ -14,6 +14,7 @@ WORKER_CLOUDSQL_INSTANCES="${WORKER_CLOUDSQL_INSTANCES:-$API_CLOUDSQL_INSTANCES}
 API_ALLOWED_ORIGINS="${API_ALLOWED_ORIGINS:-https://police-cases-kb-809677427844.asia-southeast1.run.app}"
 API_DATABASE_SECRET="${API_DATABASE_SECRET:-police-cases-kb-database-url:latest}"
 API_JWT_SECRET="${API_JWT_SECRET:-police-cases-kb-jwt-secret:latest}"
+API_OPENROUTER_KEY_SECRET="${API_OPENROUTER_KEY_SECRET:-openrouter-api-key:latest}"
 WEB_API_UPSTREAM="${WEB_API_UPSTREAM:-https://police-cases-kb-api-809677427844.asia-southeast1.run.app}"
 WORKER_DATABASE_SECRET="${WORKER_DATABASE_SECRET:-$API_DATABASE_SECRET}"
 WORKER_OPENAI_API_KEY_SECRET="${WORKER_OPENAI_API_KEY_SECRET:-openai-api-key:latest}"
@@ -160,6 +161,8 @@ ensure_secret_accessor "${WORKER_DOCUMENT_AI_SECRET%%:*}"
 if [ -n "$WORKER_GEMINI_API_KEY_SECRET" ]; then
   ensure_secret_accessor "${WORKER_GEMINI_API_KEY_SECRET%%:*}"
 fi
+require_secret "${API_OPENROUTER_KEY_SECRET%%:*}"
+ensure_secret_accessor "${API_OPENROUTER_KEY_SECRET%%:*}"
 ok "Required worker secrets are present"
 
 step "Building API image"
@@ -194,8 +197,8 @@ gcloud run deploy "$API_SERVICE" \
   --min-instances 0 \
   --max-instances 10 \
   --add-cloudsql-instances "$API_CLOUDSQL_INSTANCES" \
-  --set-env-vars "NODE_ENV=production,DATABASE_SSL=false,ALLOWED_ORIGINS=${API_ALLOWED_ORIGINS},STORAGE_BASE_DIR=./uploads" \
-  --set-secrets "DATABASE_URL=${API_DATABASE_SECRET},JWT_SECRET=${API_JWT_SECRET}" \
+  --set-env-vars "NODE_ENV=production,DATABASE_SSL=false,ALLOWED_ORIGINS=${API_ALLOWED_ORIGINS},STORAGE_BASE_DIR=./uploads,ALLOW_LOCAL_STORAGE_SHARED_MOUNT=true" \
+  --set-secrets "DATABASE_URL=${API_DATABASE_SECRET},JWT_SECRET=${API_JWT_SECRET},OPENROUTER_API_KEY=${API_OPENROUTER_KEY_SECRET}" \
   "${api_volume_args[@]+"${api_volume_args[@]}"}" \
   --quiet
 API_URL="$(get_service_url "$API_SERVICE")"

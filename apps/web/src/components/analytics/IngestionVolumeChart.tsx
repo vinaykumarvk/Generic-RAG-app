@@ -10,23 +10,36 @@ interface VolumeData {
   total_bytes: number;
 }
 
+interface LegacyVolumeData {
+  day: string;
+  doc_count: number;
+  total_bytes: number;
+}
+
+interface IngestionVolumeResponse {
+  period_days?: number;
+  data?: VolumeData[];
+  volume?: LegacyVolumeData[] | VolumeData[];
+}
+
 export function IngestionVolumeChart({ workspaceId }: { workspaceId: string }) {
   const [days, setDays] = useState(30);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["ingestion-volume", workspaceId, days],
     queryFn: () =>
-      apiFetch<{ data: VolumeData[] }>(
+      apiFetch<IngestionVolumeResponse>(
         `/api/v1/workspaces/${workspaceId}/admin/ingestion-volume?days=${days}`
       ),
     enabled: !!workspaceId,
   });
 
   const handleExportCsv = () => {
-    if (!data?.data) return;
+    const rows = getVolumeRows(data);
+    if (rows.length === 0) return;
     const headers = "Date,Uploads,Bytes\n";
-    const rows = data.data.map((d) => `${d.day},${d.upload_count},${d.total_bytes}`).join("\n");
-    const blob = new Blob([headers + rows], { type: "text/csv" });
+    const csvRows = rows.map((d) => `${d.day},${d.upload_count},${d.total_bytes}`).join("\n");
+    const blob = new Blob([headers + csvRows], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -44,7 +57,9 @@ export function IngestionVolumeChart({ workspaceId }: { workspaceId: string }) {
     );
   }
 
-  if (error || !data?.data) {
+  const rows = getVolumeRows(data);
+
+  if (error || rows.length === 0) {
     return (
       <div className="bg-surface-primary border border-border-primary rounded-xl p-6">
         <p className="text-sm text-text-tertiary">Ingestion volume data unavailable</p>
@@ -52,7 +67,7 @@ export function IngestionVolumeChart({ workspaceId }: { workspaceId: string }) {
     );
   }
 
-  const chartData = data.data.map((d) => ({
+  const chartData = rows.map((d) => ({
     date: new Date(d.day).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
     uploads: d.upload_count,
     sizeMB: Math.round(d.total_bytes / 1024 / 1024),
@@ -120,4 +135,20 @@ export function IngestionVolumeChart({ workspaceId }: { workspaceId: string }) {
       </div>
     </div>
   );
+}
+
+function getVolumeRows(data: IngestionVolumeResponse | undefined): VolumeData[] {
+  if (data?.data?.length) {
+    return data.data;
+  }
+
+  if (!data?.volume?.length) {
+    return [];
+  }
+
+  return data.volume.map((row) => ({
+    day: row.day,
+    upload_count: "upload_count" in row ? row.upload_count : row.doc_count,
+    total_bytes: row.total_bytes,
+  }));
 }

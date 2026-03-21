@@ -53,7 +53,7 @@ export function createLlmConfigRoutes(deps: LlmConfigRouteDeps) {
       const result = await queryFn(
         `SELECT config_id, provider, display_name, api_base_url, model_id,
                 is_active, is_default, max_tokens, temperature, timeout_ms, max_retries,
-                created_at, updated_at
+                config_jsonb, created_at, updated_at
          FROM llm_provider_config
          ORDER BY is_default DESC, provider ASC`,
       );
@@ -80,6 +80,9 @@ export function createLlmConfigRoutes(deps: LlmConfigRouteDeps) {
             temperature: { type: "number", minimum: 0, maximum: 2 },
             timeoutMs: { type: "integer", minimum: 1000, maximum: 120000 },
             maxRetries: { type: "integer", minimum: 0, maximum: 5 },
+            assignedUseCases: { type: "array", items: { type: "string" }, maxItems: 20 },
+            inputCostPerMillion: { type: "number", minimum: 0 },
+            outputCostPerMillion: { type: "number", minimum: 0 },
           },
         },
       },
@@ -91,6 +94,8 @@ export function createLlmConfigRoutes(deps: LlmConfigRouteDeps) {
         provider: string; displayName: string; apiBaseUrl: string;
         apiKeyEnc?: string; modelId: string; isActive?: boolean; isDefault?: boolean;
         maxTokens?: number; temperature?: number; timeoutMs?: number; maxRetries?: number;
+        assignedUseCases?: string[];
+        inputCostPerMillion?: number; outputCostPerMillion?: number;
       };
 
       // If setting as default, unset existing default
@@ -98,23 +103,122 @@ export function createLlmConfigRoutes(deps: LlmConfigRouteDeps) {
         await queryFn(`UPDATE llm_provider_config SET is_default = FALSE WHERE is_default = TRUE`);
       }
 
+      const configJsonb: Record<string, unknown> = {};
+      if (body.assignedUseCases?.length) configJsonb.assigned_use_cases = body.assignedUseCases;
+      if (body.inputCostPerMillion != null) configJsonb.input_cost_per_million = body.inputCostPerMillion;
+      if (body.outputCostPerMillion != null) configJsonb.output_cost_per_million = body.outputCostPerMillion;
+
       const result = await queryFn(
         `INSERT INTO llm_provider_config
            (provider, display_name, api_base_url, api_key_enc, model_id,
-            is_active, is_default, max_tokens, temperature, timeout_ms, max_retries)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-         RETURNING config_id, provider, display_name, model_id, is_active, is_default`,
+            is_active, is_default, max_tokens, temperature, timeout_ms, max_retries, config_jsonb)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         RETURNING config_id, provider, display_name, model_id, is_active, is_default, config_jsonb`,
         [
           body.provider, body.displayName, body.apiBaseUrl,
           body.apiKeyEnc || null, body.modelId,
           body.isActive ?? true, body.isDefault ?? false,
           body.maxTokens ?? 2048, body.temperature ?? 0.3,
           body.timeoutMs ?? 30000, body.maxRetries ?? 2,
+          JSON.stringify(configJsonb),
         ],
       );
 
       llmProvider.invalidateProviderCache();
       reply.code(201);
+      return { provider: result.rows[0] };
+    });
+
+    // ── PATCH /api/v1/assistant/llm/providers/:id ──────────────────────────────
+    app.patch("/api/v1/assistant/llm/providers/:id", {
+      schema: {
+        params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+        body: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            displayName: { type: "string", minLength: 1, maxLength: 100 },
+            apiBaseUrl: { type: "string", minLength: 1, maxLength: 500 },
+            apiKeyEnc: { type: "string", maxLength: 500 },
+            modelId: { type: "string", minLength: 1, maxLength: 100 },
+            isActive: { type: "boolean" },
+            isDefault: { type: "boolean" },
+            maxTokens: { type: "integer", minimum: 1, maximum: 32768 },
+            temperature: { type: "number", minimum: 0, maximum: 2 },
+            timeoutMs: { type: "integer", minimum: 1000, maximum: 120000 },
+            maxRetries: { type: "integer", minimum: 0, maximum: 5 },
+            assignedUseCases: { type: "array", items: { type: "string" }, maxItems: 20 },
+            inputCostPerMillion: { type: "number", minimum: 0 },
+            outputCostPerMillion: { type: "number", minimum: 0 },
+          },
+        },
+      },
+    }, async (request, reply) => {
+      const user = getUser(request);
+      if (!isAdmin(user)) return send403(reply, "FORBIDDEN", "Admin access required");
+
+      const { id } = request.params as { id: string };
+      const body = request.body as {
+        displayName?: string; apiBaseUrl?: string; apiKeyEnc?: string;
+        modelId?: string; isActive?: boolean; isDefault?: boolean;
+        maxTokens?: number; temperature?: number; timeoutMs?: number;
+        maxRetries?: number; assignedUseCases?: string[];
+        inputCostPerMillion?: number; outputCostPerMillion?: number;
+      };
+
+      // If setting as default, unset existing default
+      if (body.isDefault) {
+        await queryFn(`UPDATE llm_provider_config SET is_default = FALSE WHERE is_default = TRUE`);
+      }
+
+      // Build SET clauses dynamically from provided fields
+      const sets: string[] = [];
+      const params: unknown[] = [];
+      let idx = 1;
+
+      const fieldMap: Record<string, string> = {
+        displayName: "display_name", apiBaseUrl: "api_base_url", apiKeyEnc: "api_key_enc",
+        modelId: "model_id", isActive: "is_active", isDefault: "is_default",
+        maxTokens: "max_tokens", temperature: "temperature", timeoutMs: "timeout_ms",
+        maxRetries: "max_retries",
+      };
+
+      for (const [key, col] of Object.entries(fieldMap)) {
+        const val = body[key as keyof typeof body];
+        if (val !== undefined) {
+          sets.push(`${col} = $${idx++}`);
+          params.push(val);
+        }
+      }
+
+      // Merge config_jsonb fields (use cases + pricing)
+      const jsonbMerge: Record<string, unknown> = {};
+      if (body.assignedUseCases !== undefined) jsonbMerge.assigned_use_cases = body.assignedUseCases;
+      if (body.inputCostPerMillion !== undefined) jsonbMerge.input_cost_per_million = body.inputCostPerMillion;
+      if (body.outputCostPerMillion !== undefined) jsonbMerge.output_cost_per_million = body.outputCostPerMillion;
+      if (Object.keys(jsonbMerge).length > 0) {
+        sets.push(`config_jsonb = config_jsonb || $${idx++}::jsonb`);
+        params.push(JSON.stringify(jsonbMerge));
+      }
+
+      if (sets.length === 0) {
+        return sendError(reply, 400, "BAD_REQUEST", "No fields to update");
+      }
+
+      sets.push(`updated_at = now()`);
+      params.push(id);
+
+      const result = await queryFn(
+        `UPDATE llm_provider_config SET ${sets.join(", ")} WHERE config_id = $${idx}
+         RETURNING config_id, provider, display_name, model_id, is_active, is_default, config_jsonb`,
+        params,
+      );
+
+      if (result.rows.length === 0) {
+        return sendError(reply, 404, "NOT_FOUND", "Provider not found");
+      }
+
+      llmProvider.invalidateProviderCache();
       return { provider: result.rows[0] };
     });
 
