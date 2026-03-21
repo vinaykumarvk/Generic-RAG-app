@@ -12,13 +12,14 @@ interface MarkdownContentProps {
 function stripTrailingReferencesSection(raw: string): string {
   const trailingRefs = /(?:^|\n{2,})(?:\*\*References\*\*|References)\b[\s\S]*$/i;
   const match = raw.match(trailingRefs);
-  if (!match || match.index < 0) return raw;
+  if (!match || match.index == null || match.index < 0) return raw;
 
-  const candidate = raw.slice(match.index);
+  const idx = match.index;
+  const candidate = raw.slice(idx);
   const looksLikeCitationBlock = /(?:\[\d+\]|page\s+\d+|\.pdf\b|\.docx?\b|\.xlsx?\b|\.txt\b|\.md\b)/i.test(candidate);
   if (!looksLikeCitationBlock) return raw;
 
-  return raw.slice(0, match.index).trimEnd();
+  return raw.slice(0, idx).trimEnd();
 }
 
 function processContent(
