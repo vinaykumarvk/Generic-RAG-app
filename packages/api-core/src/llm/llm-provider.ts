@@ -72,6 +72,7 @@ export type LlmUseCase =
   | "ENTITY_DETECTION"
   | "RERANK"
   | "ANSWER_GENERATION"
+  | "ANSWER_REGENERATION"
   | "DOCUMENT_CLASSIFY"
   | "OCR_CORRECTION"
   | "GENERAL";
@@ -224,7 +225,7 @@ interface LlmProviderAdapter {
     messages: LlmMessage[],
     maxTokens: number,
     temperature: number | undefined,
-    options?: { jsonMode?: boolean },
+    options?: { jsonMode?: boolean; useCase?: LlmUseCase },
   ): { url: string; headers: Record<string, string>; body: unknown };
 
   parseResponse(json: unknown): {
@@ -250,6 +251,31 @@ function injectJsonInstruction(messages: LlmMessage[]): LlmMessage[] {
   return result;
 }
 
+function isOpenRouterConfig(config: LlmProviderConfig): boolean {
+  return typeof config.api_base_url === "string" && config.api_base_url.includes("openrouter.ai");
+}
+
+function getOpenRouterReasoningConfig(
+  config: LlmProviderConfig,
+  maxTokens: number,
+  options?: { jsonMode?: boolean; useCase?: LlmUseCase },
+): { reasoning: { effort: string } } | undefined {
+  if (!isOpenRouterConfig(config)) return undefined;
+  const modelId = (config.model_id || "").toLowerCase();
+  if (!(modelId.startsWith("qwen/") || modelId.startsWith("deepseek/"))) return undefined;
+
+  // Keep small or structured calls deterministic and non-blank.
+  // These routes do not benefit from chain-of-thought and can easily spend the
+  // full output budget on reasoning tokens before any visible content is emitted.
+  if (options?.jsonMode || maxTokens <= 512) {
+    return { reasoning: { effort: "none" } };
+  }
+
+  // For substantive answer generation, allow the model's default reasoning
+  // behavior so quality can be evaluated with a realistic budget.
+  return undefined;
+}
+
 const OpenAiAdapter: LlmProviderAdapter = {
   buildRequest(config, messages, maxTokens, temperature, options) {
     const finalMessages = options?.jsonMode ? injectJsonInstruction(messages) : messages;
@@ -264,6 +290,7 @@ const OpenAiAdapter: LlmProviderAdapter = {
         messages: finalMessages,
         max_completion_tokens: maxTokens,
         ...(temperature !== undefined && { temperature }),
+        ...getOpenRouterReasoningConfig(config, maxTokens, options),
       },
     };
   },
@@ -714,7 +741,7 @@ export function createLlmProvider(deps: LlmProviderDeps): LlmProvider {
       : baseConfig;
 
     // Use Responses API for OpenAI model overrides (handles reasoning tokens separately)
-    const adapter = (request.modelOverride && config.provider === "openai")
+    const adapter = (request.modelOverride && config.provider === "openai" && !isOpenRouterConfig(config))
       ? OpenAiResponsesAdapter
       : ADAPTERS[config.provider];
     if (!adapter) {
@@ -740,12 +767,30 @@ export function createLlmProvider(deps: LlmProviderDeps): LlmProvider {
     const temperature = request.temperature !== undefined
       ? Number(request.temperature)
       : request.modelOverride ? undefined : (Number(config.temperature) || 0.3);
-    const { url, headers: hdrs, body } = adapter.buildRequest(config, messages, maxTokens, temperature, { jsonMode: request.jsonMode });
+    const { url, headers: hdrs, body } = adapter.buildRequest(
+      config,
+      messages,
+      maxTokens,
+      temperature,
+      { jsonMode: request.jsonMode, useCase: request.useCase },
+    );
 
     const start = Date.now();
     try {
       const json = await resilientFetch(url, hdrs, body, config.timeout_ms, config.max_retries);
       const parsed = adapter.parseResponse(json);
+      // Strip thinking blocks from reasoning models (Qwen, DeepSeek, etc.)
+      // These <think>...</think> tags confuse markdown renderers and are not user-facing content.
+      if (/<think>/i.test(parsed.content)) {
+        const stripped = parsed.content.replace(/<think>[\s\S]*?<\/think>\s*/gi, "").trim();
+        if (stripped) {
+          parsed.content = stripped;
+        } else {
+          // Entire response was inside <think> — extract inner content as the answer
+          const inner = parsed.content.replace(/<\/?think>/gi, "").trim();
+          parsed.content = inner;
+        }
+      }
       recordSuccess(host);
 
       // Calculate cost from token counts + pricing in config_jsonb

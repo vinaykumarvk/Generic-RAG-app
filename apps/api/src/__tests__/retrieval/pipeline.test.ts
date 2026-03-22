@@ -338,6 +338,7 @@ describe("executeRetrievalPipeline", () => {
           scopeMode: "global",
           scopeSource: "global",
         }),
+        "ANSWER_GENERATION",
       );
 
       delete process.env.PRESET_MODEL_BALANCED;
@@ -367,6 +368,39 @@ describe("executeRetrievalPipeline", () => {
           scopeMode: "global",
           scopeSource: "global",
         }),
+        "ANSWER_GENERATION",
+      );
+    });
+
+    it("routes regenerate requests through the answer-regeneration use case", async () => {
+      queryFn = createMockQueryFn();
+      llmProvider = createMockLlmProvider();
+      queryFn.mockResolvedValueOnce({ rows: [{ conversation_id: "conv-1" }], rowCount: 1 });
+      queryFn.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+      setupFullPipelineMocks();
+
+      await executeRetrievalPipeline(
+        { queryFn, llmProvider },
+        makeRequest({ preset: "balanced", regenerate: true, skipUserMessage: true })
+      );
+
+      expect(llmProvider.getModelForPreset).toHaveBeenCalledWith("ANSWER_REGENERATION", "balanced");
+      expect(generateAnswer).toHaveBeenCalledWith(
+        llmProvider,
+        "What are the data privacy regulations?",
+        expect.any(Array),
+        expect.any(String),
+        expect.any(Array),
+        "balanced",
+        undefined,
+        expect.arrayContaining([{ name: "data privacy", type: "concept" }]),
+        expect.objectContaining({
+          requestedCaseScopes: [],
+          matchedCaseScopes: [],
+          scopeMode: "global",
+          scopeSource: "global",
+        }),
+        "ANSWER_REGENERATION",
       );
     });
   });
@@ -751,6 +785,7 @@ describe("executeRetrievalPipeline", () => {
           scopeMode: "single",
           scopeSource: "follow_up_single",
         }),
+        "ANSWER_GENERATION",
       );
     });
 
@@ -892,6 +927,7 @@ describe("executeRetrievalPipeline", () => {
           scopeMode: "multi",
           scopeSource: "explicit_multi",
         }),
+        "ANSWER_GENERATION",
       );
     });
 
@@ -1052,6 +1088,7 @@ describe("executeRetrievalPipeline", () => {
           scopeMode: "multi",
           scopeSource: "follow_up_multi",
         }),
+        "ANSWER_GENERATION",
       );
     });
 

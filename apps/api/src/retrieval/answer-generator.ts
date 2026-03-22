@@ -5,14 +5,14 @@
  * FR-016: Brief/detailed format instructions, caution language, filter suggestions.
  */
 
-import type { LlmProvider } from "@puda/api-core";
+import type { LlmProvider, LlmUseCase } from "@puda/api-core";
 import type { RankedChunk } from "./reranker";
 
 /** Word/token limits by preset (FR-014/AC-04) */
 const PRESET_LIMITS: Record<string, { words: number; tokens: number; maxCitations: number; format: string }> = {
-  concise:  { words: 150,  tokens: 512,  maxCitations: 5,  format: "Use bullet points. Be brief and direct." },
-  balanced: { words: 500,  tokens: 1024, maxCitations: 10, format: "Use clear paragraphs with headers if needed." },
-  detailed: { words: 900,  tokens: 2048, maxCitations: 10, format: "Use section headings. Provide thorough analysis with supporting details." },
+  concise:  { words: 150,  tokens: 4096,  maxCitations: 5,  format: "Use bullet points. Be brief and direct." },
+  balanced: { words: 500,  tokens: 8192,  maxCitations: 10, format: "Use clear paragraphs with headers if needed." },
+  detailed: { words: 900,  tokens: 32768, maxCitations: 10, format: "Use section headings. Provide thorough analysis with supporting details." },
 };
 
 export interface GeneratedAnswer {
@@ -52,6 +52,7 @@ export async function generateAnswer(
   modelOverride?: string,
   scopeEntities?: Array<{ name: string; type: string }>,
   scopeContext?: AnswerScopeContext,
+  useCase: Extract<LlmUseCase, "ANSWER_GENERATION" | "ANSWER_REGENERATION"> = "ANSWER_GENERATION",
 ): Promise<GeneratedAnswer | null> {
   // FR-014/AC-06: zero-chunks check before LLM call
   if (chunks.length === 0) {
@@ -150,7 +151,7 @@ RULES:
   const start = Date.now();
   const result = await llmProvider.llmComplete({
     messages,
-    useCase: "ANSWER_GENERATION",
+    useCase,
     maxTokens: limits.tokens,
     temperature: modelOverride ? undefined : 0.2,
     modelOverride,

@@ -476,7 +476,36 @@ describe("generateAnswer", () => {
 
       const callArgs = llmProvider.llmComplete.mock.calls[0][0];
       expect(callArgs.useCase).toBe("ANSWER_GENERATION");
-      expect(callArgs.maxTokens).toBe(1024);
+      expect(callArgs.maxTokens).toBe(8192);
+      expect(callArgs.temperature).toBe(0.2);
+    });
+
+    it("uses the regeneration use case when requested", async () => {
+      const llmProvider = createMockLlmProvider();
+      llmProvider.llmComplete.mockResolvedValueOnce({
+        content: "Regenerated answer.",
+        provider: "openai",
+        model: "gpt-5.2",
+        latencyMs: 100,
+        fallbackUsed: false,
+      });
+
+      await generateAnswer(
+        llmProvider,
+        "test",
+        [makeRankedChunk()],
+        "",
+        [],
+        "balanced",
+        undefined,
+        undefined,
+        undefined,
+        "ANSWER_REGENERATION",
+      );
+
+      const callArgs = llmProvider.llmComplete.mock.calls[0][0];
+      expect(callArgs.useCase).toBe("ANSWER_REGENERATION");
+      expect(callArgs.maxTokens).toBe(8192);
       expect(callArgs.temperature).toBe(0.2);
     });
   });

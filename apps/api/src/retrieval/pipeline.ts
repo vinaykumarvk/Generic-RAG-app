@@ -51,6 +51,7 @@ export interface PipelineRequest {
   preset: "concise" | "balanced" | "detailed";
   mode?: "hybrid" | "vector_only" | "metadata_only" | "graph_only";
   skipCache?: boolean;
+  regenerate?: boolean;
   skipUserMessage?: boolean;
   userClearance?: string;
   userType?: string;
@@ -972,7 +973,8 @@ export async function executeRetrievalPipeline(
 
   // Step 9: Answer generation (reuse history fetched earlier)
   // FR-014/AC-05: Use centralized model routing (LlmProvider) with env-var fallback
-  const routedModel = llmProvider.getModelForPreset("ANSWER_GENERATION", request.preset);
+  const answerUseCase = request.regenerate ? "ANSWER_REGENERATION" : "ANSWER_GENERATION";
+  const routedModel = llmProvider.getModelForPreset(answerUseCase, request.preset);
   const envKey = PRESET_MODEL_ENV_KEYS[request.preset];
   const answerModel = routedModel ?? (envKey ? process.env[envKey] : undefined);
 
@@ -1007,6 +1009,7 @@ export async function executeRetrievalPipeline(
       scopeMode: scopeResolution.scopeMode,
       scopeSource: scopeResolution.scopeSource,
     },
+    answerUseCase,
   );
   generationLatency = genResult?.latencyMs;
 

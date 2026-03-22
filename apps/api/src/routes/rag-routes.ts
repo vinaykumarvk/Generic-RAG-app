@@ -61,6 +61,7 @@ export function createRagRoutes(app: FastifyInstance, deps: RagRouteDeps) {
             preset: preset || "balanced",
             mode: mode || "hybrid",
             skipCache: skip_cache || regenerate || false,
+            regenerate: regenerate || false,
             skipUserMessage: regenerate || false,
             userClearance: (request.authUser as { sensitivityClearance?: string })?.sensitivityClearance || "INTERNAL",
             userType: request.authUser!.userType,

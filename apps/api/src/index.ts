@@ -125,13 +125,16 @@ async function bootstrapAdmin(queryFn: (text: string, params?: unknown[]) => Pro
   }
 }
 
-// Bootstrap LLM providers: Qwen/OpenRouter as default, Gemini assigned to KG_EXTRACTION
+// Bootstrap LLM providers: Qwen/OpenRouter as default, GPT-5.2 for answer regeneration, Gemini for KG extraction
 async function bootstrapProviders(queryFn: (text: string, params?: unknown[]) => Promise<{ rows: unknown[] }>): Promise<void> {
   try {
     const openRouterKey = process.env.OPENROUTER_API_KEY;
+    const openAiKey = process.env.OPENAI_API_KEY || process.env.OPEN_AI_API_KEY;
     if (openRouterKey) {
       const existing = await queryFn(
-        `SELECT config_id FROM llm_provider_config WHERE api_base_url LIKE '%openrouter%' LIMIT 1`,
+        `SELECT config_id, is_default FROM llm_provider_config
+         WHERE api_base_url LIKE '%openrouter%' AND model_id = 'qwen/qwen3.5-35b-a3b'
+         LIMIT 1`,
       );
       if (existing.rows.length === 0) {
         await queryFn(`UPDATE llm_provider_config SET is_default = FALSE WHERE is_default = TRUE`);
@@ -148,6 +151,63 @@ async function bootstrapProviders(queryFn: (text: string, params?: unknown[]) =>
           ],
         );
         logInfo("Bootstrap: Qwen/OpenRouter provider created as default");
+      } else {
+        const row = existing.rows[0] as { config_id: string; is_default: boolean };
+        if (!row.is_default) {
+          await queryFn(`UPDATE llm_provider_config SET is_default = FALSE WHERE is_default = TRUE`);
+          await queryFn(
+            `UPDATE llm_provider_config
+             SET is_default = TRUE,
+                 is_active = TRUE,
+                 display_name = $2
+             WHERE config_id = $1`,
+            [row.config_id, "Qwen 3.5 35B (OpenRouter)"],
+          );
+          logInfo("Bootstrap: Qwen/OpenRouter provider marked as default");
+        }
+      }
+    }
+
+    const existingGpt52 = await queryFn(
+      `SELECT config_id, config_jsonb FROM llm_provider_config
+       WHERE provider = 'openai' AND api_base_url LIKE '%api.openai.com%' AND model_id = 'gpt-5.2'
+       LIMIT 1`,
+    );
+    if (existingGpt52.rows.length === 0) {
+      if (openAiKey) {
+        await queryFn(
+          `INSERT INTO llm_provider_config
+             (provider, display_name, api_base_url, api_key_enc, model_id,
+              is_active, is_default, max_tokens, temperature, timeout_ms, max_retries, config_jsonb)
+           VALUES ($1, $2, $3, $4, $5, TRUE, FALSE, 32768, 0.2, 120000, 2, $6::jsonb)`,
+          [
+            "openai", "GPT-5.2 Regenerate",
+            "https://api.openai.com/v1", openAiKey,
+            "gpt-5.2",
+            JSON.stringify({ assigned_use_cases: ["ANSWER_REGENERATION"] }),
+          ],
+        );
+        logInfo("Bootstrap: GPT-5.2 provider created for answer regeneration");
+      } else {
+        logWarn("Bootstrap: OPENAI_API_KEY not set, cannot auto-create GPT-5.2 regenerate provider");
+      }
+    } else {
+      const row = existingGpt52.rows[0] as { config_id: string; config_jsonb: Record<string, unknown> };
+      const useCases = (row.config_jsonb?.assigned_use_cases as string[]) || [];
+      if (!useCases.includes("ANSWER_REGENERATION")) {
+        await queryFn(
+          `UPDATE llm_provider_config
+           SET config_jsonb = config_jsonb || $1::jsonb,
+               is_active = TRUE
+           WHERE config_id = $2`,
+          [
+            JSON.stringify({
+              assigned_use_cases: [...useCases, "ANSWER_REGENERATION"],
+            }),
+            row.config_id,
+          ],
+        );
+        logInfo("Bootstrap: GPT-5.2 provider assigned to answer regeneration");
       }
     }
 

@@ -12,6 +12,7 @@ export const RagLlmUseCaseSchema = z.enum([
   "ENTITY_DETECTION",
   "RERANK",
   "ANSWER_GENERATION",
+  "ANSWER_REGENERATION",
   "DOCUMENT_CLASSIFY",
   "OCR_CORRECTION",
   "GENERAL",
