@@ -1,6 +1,7 @@
 """Embeds chunks using Ollama or OpenAI embeddings API, stores in pgvector."""
 
 import logging
+import os
 import httpx
 from ..config import config
 from ..db import get_connection, get_cursor
@@ -10,7 +11,7 @@ logger = logging.getLogger(__name__)
 BATCH_SIZE = 1000  # Embed this many chunks at once (FR-008/AC-02)
 
 
-E2E_TIMEOUT_S = 60  # End-to-end timeout for all embedding (FR-008/AC-01)
+E2E_TIMEOUT_S = int(os.getenv("EMBEDDING_TIMEOUT_S", "600"))  # End-to-end timeout for all embedding (FR-008/AC-01)
 
 
 def embed_chunks(document_id: str, workspace_id: str):

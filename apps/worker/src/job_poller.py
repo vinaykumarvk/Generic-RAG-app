@@ -13,11 +13,13 @@ from .pipeline.embedder import embed_chunks
 from .pipeline.kg_extractor import extract_kg
 from .pipeline.converter import convert_document
 from .pipeline.metadata_extractor import extract_metadata
+from .pipeline.pdf_splitter import split_document
 
 logger = logging.getLogger(__name__)
 
 STEP_HANDLERS = {
     "VALIDATE": validate_document,
+    "SPLIT": split_document,
     "NORMALIZE": normalize_document,
     "CONVERT": convert_document,
     "METADATA_EXTRACT": extract_metadata,
@@ -28,7 +30,8 @@ STEP_HANDLERS = {
 
 # State transition map: step -> (next_step, doc_status_while_processing, doc_status_after_completion)
 STEP_TRANSITIONS = {
-    "VALIDATE": ("NORMALIZE", "VALIDATING", "NORMALIZING"),
+    "VALIDATE": ("SPLIT", "VALIDATING", "VALIDATED"),
+    "SPLIT": ("NORMALIZE", "SPLITTING", "NORMALIZING"),
     "NORMALIZE": ("CONVERT", "NORMALIZING", "CONVERTING"),
     "CONVERT": ("METADATA_EXTRACT", "CONVERTING", "METADATA_EXTRACTING"),
     "METADATA_EXTRACT": ("CHUNK", "METADATA_EXTRACTING", "CHUNKING"),
@@ -81,7 +84,7 @@ def poll_once():
             cur.execute("""
                 UPDATE ingestion_job
                 SET status = 'PROCESSING', attempt = %s, started_at = now(), updated_at = now(),
-                    locked_until = now() + interval '5 minutes'
+                    locked_until = now() + interval '30 minutes'
                 WHERE job_id = %s
             """, (attempt, job_id))
 
@@ -114,6 +117,16 @@ def poll_once():
                 if transition:
                     next_step = transition[0]
                     completion_doc_status = transition[2]
+
+                    # If SPLIT step completed and the splitter set SPLIT_COMPLETE,
+                    # the parent doc should not proceed — children handle their own pipeline.
+                    if step == "SPLIT":
+                        cur.execute("SELECT status FROM document WHERE document_id = %s", (doc_id,))
+                        doc_row = cur.fetchone()
+                        if doc_row and doc_row["status"] == "SPLIT_COMPLETE":
+                            logger.info("Document %s was split; skipping NORMALIZE for parent", doc_id)
+                            conn.commit()
+                            return True
 
                     # Reflect the completed step. The next step is only marked active once claimed.
                     cur.execute("UPDATE document SET status = %s, updated_at = now() WHERE document_id = %s",

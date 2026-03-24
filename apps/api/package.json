@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@fastify/multipart": "^9.0.0",
+    "@google-cloud/storage": "^7.19.0",
     "@puda/api-core": "*",
     "@puda/api-integrations": "*",
     "@puda/shared": "*",

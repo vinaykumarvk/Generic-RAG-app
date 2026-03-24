@@ -74,11 +74,13 @@ export function createDocumentRoutes(app: FastifyInstance, deps: DocumentRouteDe
   }
 
   // List documents
-  app.get<{ Params: { wid: string }; Querystring: { status?: string; page?: string; limit?: string } }>(
+  app.get<{ Params: { wid: string }; Querystring: { status?: string; page?: string; limit?: string; show_parts?: string; parent_id?: string } }>(
     "/api/v1/workspaces/:wid/documents",
     async (request) => {
       const { wid } = request.params;
       const status = request.query.status;
+      const showParts = request.query.show_parts === "true";
+      const parentId = request.query.parent_id;
       const page = Math.max(1, parseInt(request.query.page || "1", 10));
       const limit = Math.min(100, Math.max(1, parseInt(request.query.limit || "20", 10)));
       const offset = (page - 1) * limit;
@@ -91,10 +93,20 @@ export function createDocumentRoutes(app: FastifyInstance, deps: DocumentRouteDe
         whereClause += ` AND status = $${params.length}`;
       }
 
+      if (parentId) {
+        // List children of a specific parent
+        params.push(parentId);
+        whereClause += ` AND parent_document_id = $${params.length}`;
+      } else if (!showParts) {
+        // By default hide child documents
+        whereClause += " AND parent_document_id IS NULL";
+      }
+
       const [countResult, result] = await Promise.all([
         queryFn(`SELECT count(*) FROM document WHERE ${whereClause}`, params),
         queryFn(
-          `SELECT document_id, title, file_name, mime_type, file_size_bytes, status, category, subcategory, source_path, chunk_count, page_count, created_at, updated_at
+          `SELECT document_id, title, file_name, mime_type, file_size_bytes, status, category, subcategory, source_path, chunk_count, page_count, created_at, updated_at,
+                  parent_document_id, part_number, total_parts
            FROM document WHERE ${whereClause} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
           [...params, limit, offset]
         ),
@@ -125,7 +137,22 @@ export function createDocumentRoutes(app: FastifyInstance, deps: DocumentRouteDe
         [id, wid]
       );
       if (result.rows.length === 0) return send404(reply, "Document not found");
-      return result.rows[0];
+
+      const doc = result.rows[0];
+
+      // For split parents, include children summary
+      if (doc.status === "SPLIT_COMPLETE") {
+        const childrenResult = await queryFn(
+          `SELECT document_id, title, status, part_number, total_parts, file_size_bytes, chunk_count
+           FROM document
+           WHERE parent_document_id = $1 AND status != 'DELETED'
+           ORDER BY part_number`,
+          [id]
+        );
+        doc.children = childrenResult.rows;
+      }
+
+      return doc;
     }
   );
 
@@ -566,7 +593,7 @@ export function createDocumentRoutes(app: FastifyInstance, deps: DocumentRouteDe
     }
   );
 
-  // Reprocess failed document
+  // Reprocess failed or split-complete document
   app.post<{ Params: { wid: string; id: string } }>(
     "/api/v1/workspaces/:wid/documents/:id/reprocess",
     async (request, reply) => {
@@ -577,16 +604,27 @@ export function createDocumentRoutes(app: FastifyInstance, deps: DocumentRouteDe
         [id, wid]
       );
       if (docResult.rows.length === 0) return send404(reply, "Document not found");
-      if (docResult.rows[0].status !== "FAILED") {
-        return send400(reply, "Only failed documents can be reprocessed");
+
+      const docStatus = docResult.rows[0].status;
+      if (docStatus !== "FAILED" && docStatus !== "SPLIT_COMPLETE") {
+        return send400(reply, "Only failed or split-complete documents can be reprocessed");
       }
 
       const client = await deps.getClient();
       try {
         await client.query("BEGIN");
+
+        // If reprocessing a SPLIT_COMPLETE parent, delete all children first (CASCADE handles chunks etc.)
+        if (docStatus === "SPLIT_COMPLETE") {
+          await client.query(
+            "DELETE FROM document WHERE parent_document_id = $1",
+            [id]
+          );
+        }
+
         await clearRetryDerivedState(client, id);
         await client.query(
-          "UPDATE document SET status = 'UPLOADED', error_message = NULL, updated_at = now() WHERE document_id = $1",
+          "UPDATE document SET status = 'UPLOADED', error_message = NULL, total_parts = NULL, updated_at = now() WHERE document_id = $1",
           [id]
         );
         await client.query(

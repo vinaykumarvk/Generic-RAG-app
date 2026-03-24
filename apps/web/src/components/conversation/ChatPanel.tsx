@@ -83,6 +83,8 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
   const [hiddenMsgIds, setHiddenMsgIds] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<"conversation" | "summary">("conversation");
   const [journeyMessageId, setJourneyMessageId] = useState<string | null>(null);
+  const [feedbackOpen, setFeedbackOpen] = useState<string | null>(null);
+  const [feedbackText, setFeedbackText] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const qc = useQueryClient();
@@ -130,6 +132,19 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
   const lastResult = queryMutation.data;
   const showOptimisticAnswer = lastResult && !queryMutation.isPending &&
     !messages.some((m) => m.message_id === lastResult.messageId);
+
+  // Reset stale state when switching conversations
+  useEffect(() => {
+    queryMutation.reset();
+    setPendingQuestion(null);
+    setRegeneratingMsgId(null);
+    setHiddenMsgIds(new Set());
+    setJourneyMessageId(null);
+    setFeedbackOpen(null);
+    setFeedbackText("");
+    setActiveTab("conversation");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -188,9 +203,6 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
     setHiddenMsgIds((prev) => new Set(prev).add(assistantMsgId));
     queryMutation.mutate({ question, regenerate: true });
   };
-
-  const [feedbackOpen, setFeedbackOpen] = useState<string | null>(null);
-  const [feedbackText, setFeedbackText] = useState("");
 
   // FR-019: 3-level feedback (HELPFUL, PARTIALLY_HELPFUL, NOT_HELPFUL)
   const handleFeedback = async (messageId: string, level: "HELPFUL" | "PARTIALLY_HELPFUL" | "NOT_HELPFUL") => {

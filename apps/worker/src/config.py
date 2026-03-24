@@ -15,6 +15,7 @@ class Config:
     MAX_RETRIES: int = int(os.getenv("WORKER_MAX_RETRIES", "3"))
     DB_POOL_MAXCONN: int = max(5, int(os.getenv("WORKER_DB_POOL_MAXCONN", str(max(5, POLLER_THREADS * 3)))))
     MAX_FILE_BYTES: int = int(os.getenv("STORAGE_MAX_FILE_BYTES", "104857600"))
+    PDF_SPLIT_THRESHOLD_BYTES: int = int(os.getenv("PDF_SPLIT_THRESHOLD_BYTES", "20971520"))  # 20 MB, 0 = disabled
     CHUNK_SIZE_TOKENS: int = int(os.getenv("CHUNK_SIZE_TOKENS", "512"))
     CHUNK_OVERLAP_TOKENS: int = int(os.getenv("CHUNK_OVERLAP_TOKENS", "50"))
     CHUNK_OVERLAP: float = float(os.getenv("CHUNK_OVERLAP", "0.12"))

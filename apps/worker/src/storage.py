@@ -90,6 +90,40 @@ class StorageClient:
         logger.info(f"Saved artifact to {full_path}")
         return path
 
+    def upload_document(
+        self,
+        workspace_id: str,
+        doc_id: str,
+        filename: str,
+        content: bytes,
+    ) -> str:
+        """Upload a split PDF part and return the storage path.
+
+        Local: {STORAGE_BASE_DIR}/{workspace_id}/{doc_id}{ext}
+        GCS:   {workspace_id}/documents/{YYYY}/{MM}/{doc_id}/{filename}
+        """
+        ext = os.path.splitext(filename)[1]
+
+        if self.provider == "gcs":
+            from datetime import datetime
+            now = datetime.utcnow()
+            gcs_path = f"{workspace_id}/documents/{now.year}/{now.month:02d}/{doc_id}/{filename}"
+            if not self._gcs_bucket:
+                raise RuntimeError("GCS bucket not initialized")
+            blob = self._gcs_bucket.blob(gcs_path)
+            blob.upload_from_string(content, content_type="application/pdf")
+            logger.info(f"Uploaded split part to gs://{self._gcs_bucket.name}/{gcs_path}")
+            return gcs_path
+
+        # Local storage — matches API LocalStorageProvider layout
+        base_dir = config.STORAGE_BASE_DIR
+        local_path = os.path.join(base_dir, workspace_id, f"{doc_id}{ext}")
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        with open(local_path, "wb") as f:
+            f.write(content)
+        logger.info(f"Saved split part to {local_path}")
+        return local_path
+
     def cleanup_temp(self, temp_path: str, original_path: str):
         """Clean up temp file if it differs from original (i.e., was downloaded)."""
         if temp_path != original_path and os.path.exists(temp_path):

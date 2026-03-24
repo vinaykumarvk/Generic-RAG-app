@@ -2,7 +2,7 @@ import { useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, apiDelete } from "@/lib/api";
-import { CheckCircle, AlertCircle, Clock, RefreshCw, Trash2, Download, Eye } from "lucide-react";
+import { CheckCircle, AlertCircle, Clock, RefreshCw, Trash2, Download, Eye, SplitSquareVertical } from "lucide-react";
 import { getDocumentIcon } from "@/lib/document-icons";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
@@ -20,6 +20,9 @@ interface Document {
   error_message?: string;
   uploaded_by?: string;
   created_at: string;
+  parent_document_id?: string | null;
+  part_number?: number | null;
+  total_parts?: number | null;
 }
 
 interface DocumentsResponse {
@@ -34,6 +37,8 @@ const PAGE_SIZE = 20;
 const ALL_STATUSES = [
   "UPLOADED",
   "VALIDATING",
+  "SPLITTING",
+  "SPLIT_COMPLETE",
   "NORMALIZING",
   "CONVERTING",
   "METADATA_EXTRACTING",
@@ -49,6 +54,7 @@ const ALL_STATUSES = [
 
 const PROGRESS_MAP: Record<string, number> = {
   VALIDATING: 10,
+  SPLITTING: 15,
   NORMALIZING: 20,
   CONVERTING: 35,
   METADATA_EXTRACTING: 50,
@@ -62,6 +68,8 @@ const PROGRESS_MAP: Record<string, number> = {
 const STATUS_META: Record<string, { label: string }> = {
   UPLOADED: { label: "Uploaded" },
   VALIDATING: { label: "Validating" },
+  SPLITTING: { label: "Splitting" },
+  SPLIT_COMPLETE: { label: "Split into parts" },
   NORMALIZING: { label: "Normalizing" },
   CONVERTING: { label: "Converting" },
   METADATA_EXTRACTING: { label: "Extracting Metadata" },
@@ -153,6 +161,15 @@ function StatusDisplay({ status, errorMessage }: { status: string; errorMessage?
           </p>
         )}
       </div>
+    );
+  }
+
+  if (status === "SPLIT_COMPLETE") {
+    return (
+      <span className="flex items-center gap-1.5 text-success">
+        <SplitSquareVertical size={14} aria-hidden="true" />
+        <span className="text-xs font-medium">{meta.label}</span>
+      </span>
     );
   }
 
@@ -389,6 +406,11 @@ export function DocumentList({ workspaceId }: { workspaceId: string }) {
                           >
                             {doc.title}
                           </Link>
+                          {doc.part_number != null && doc.total_parts != null && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary-100 text-primary-700 mt-1">
+                              Part {doc.part_number}/{doc.total_parts}
+                            </span>
+                          )}
                           <p className="text-xs text-text-tertiary break-all mt-1">{doc.file_name}</p>
                         </div>
                       </div>
@@ -519,6 +541,11 @@ export function DocumentList({ workspaceId }: { workspaceId: string }) {
                           >
                             {doc.title}
                           </Link>
+                          {doc.part_number != null && doc.total_parts != null && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary-100 text-primary-700">
+                              Part {doc.part_number}/{doc.total_parts}
+                            </span>
+                          )}
                         </div>
                         <span className="text-xs text-text-tertiary">{doc.file_name}</span>
                       </td>

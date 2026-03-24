@@ -10,6 +10,7 @@ interface PipelineStep {
 
 const STEP_LABELS: Record<string, string> = {
   VALIDATE: "Validate",
+  SPLIT: "Split PDF",
   NORMALIZE: "Normalize & OCR",
   CONVERT: "Convert",
   METADATA_EXTRACT: "Metadata",
@@ -33,7 +34,7 @@ export function DocumentStatus({ workspaceId, documentId }: { workspaceId: strin
           if (!cancelled) {
             setStatus(data);
             const hasInFlightJobs = (data.jobs || []).some((job) => ["PENDING", "PROCESSING", "RETRYING"].includes(job.status));
-            if (["ACTIVE", "FAILED", "DELETED"].includes(data.status)) break;
+            if (["ACTIVE", "FAILED", "DELETED", "SPLIT_COMPLETE"].includes(data.status)) break;
             if (data.status === "SEARCHABLE" && !hasInFlightJobs) break;
           }
         } catch {
@@ -49,7 +50,27 @@ export function DocumentStatus({ workspaceId, documentId }: { workspaceId: strin
 
   if (!status) return null;
 
-  const steps = ["VALIDATE", "NORMALIZE", "CONVERT", "METADATA_EXTRACT", "CHUNK", "EMBED", "KG_EXTRACT"];
+  const steps = ["VALIDATE", "SPLIT", "NORMALIZE", "CONVERT", "METADATA_EXTRACT", "CHUNK", "EMBED", "KG_EXTRACT"];
+
+  // For split parents, show a message instead of the full pipeline
+  if (status.status === "SPLIT_COMPLETE") {
+    const totalParts = (status as Record<string, unknown>).total_parts as number | null | undefined;
+    return (
+      <div className="space-y-2" role="status" aria-label="Document processing status">
+        <div className="flex items-center gap-3">
+          <CheckCircle size={16} className="text-success" aria-hidden="true" />
+          <span className="text-sm text-success">Validate</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <CheckCircle size={16} className="text-success" aria-hidden="true" />
+          <span className="text-sm text-success">Split PDF</span>
+        </div>
+        <p className="text-sm text-text-secondary mt-2">
+          Split into {totalParts ?? "multiple"} parts — each part processes independently
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2" role="status" aria-label="Document processing status">
