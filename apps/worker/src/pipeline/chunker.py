@@ -5,6 +5,7 @@ import json
 import math
 import re
 import logging
+from psycopg2.extras import execute_values
 from ..config import config
 from ..db import get_connection, get_cursor
 from .embedder import _get_embeddings
@@ -126,17 +127,24 @@ def chunk_document(document_id: str, workspace_id: str):
             # Remove existing chunks for this document
             cur.execute("DELETE FROM chunk WHERE document_id = %s", (document_id,))
 
-            for i, chunk in enumerate(chunks):
-                token_count = len(chunk["content"]) // CHARS_PER_TOKEN
-                cur.execute("""
-                    INSERT INTO chunk (document_id, workspace_id, chunk_index, content, chunk_type,
-                                       token_count, page_start, page_end, heading_path, metadata)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (
+            rows = [
+                (
                     document_id, workspace_id, i, chunk["content"], chunk["type"],
-                    token_count, chunk.get("page_start"), chunk.get("page_end"),
-                    chunk.get("heading_path"), json.dumps(doc_metadata)
-                ))
+                    len(chunk["content"]) // CHARS_PER_TOKEN,
+                    chunk.get("page_start"), chunk.get("page_end"),
+                    chunk.get("heading_path"), json.dumps(doc_metadata),
+                )
+                for i, chunk in enumerate(chunks)
+            ]
+            if rows:
+                execute_values(
+                    cur,
+                    """INSERT INTO chunk (document_id, workspace_id, chunk_index, content, chunk_type,
+                                          token_count, page_start, page_end, heading_path, metadata)
+                       VALUES %s""",
+                    rows,
+                    page_size=500,
+                )
 
             # Update document chunk count
             cur.execute("""

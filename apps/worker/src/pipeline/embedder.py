@@ -3,6 +3,7 @@
 import logging
 import os
 import httpx
+from psycopg2.extras import execute_values
 from ..config import config
 from ..db import get_connection, get_cursor
 
@@ -78,11 +79,19 @@ def embed_chunks(document_id: str, workspace_id: str):
 
             with get_connection() as conn:
                 with get_cursor(conn) as cur:
-                    for chunk_id, embedding, content_hash in zip(chunk_ids, embeddings, hashes):
-                        vec_str = "[" + ",".join(str(v) for v in embedding) + "]"
-                        cur.execute("""
-                            UPDATE chunk SET embedding = %s::vector, content_hash = %s WHERE chunk_id = %s
-                        """, (vec_str, content_hash, chunk_id))
+                    update_rows = [
+                        (chunk_id, "[" + ",".join(str(v) for v in embedding) + "]", content_hash)
+                        for chunk_id, embedding, content_hash in zip(chunk_ids, embeddings, hashes)
+                    ]
+                    execute_values(
+                        cur,
+                        """UPDATE chunk AS c
+                           SET embedding = v.vec::vector, content_hash = v.hash
+                           FROM (VALUES %s) AS v(id, vec, hash)
+                           WHERE c.chunk_id = v.id::uuid""",
+                        update_rows,
+                        page_size=500,
+                    )
 
             logger.info(f"Embedded batch {i // BATCH_SIZE + 1}/{(total + BATCH_SIZE - 1) // BATCH_SIZE}")
 

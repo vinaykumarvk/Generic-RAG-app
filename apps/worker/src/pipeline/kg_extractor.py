@@ -3,6 +3,7 @@
 import json
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
@@ -13,13 +14,14 @@ from langextract.core import exceptions as lx_exceptions
 from langextract.core import types as lx_core_types
 from langextract.data import ExampleData as LxExampleData, Extraction as LxExtraction
 from langextract.providers.openai import OpenAILanguageModel
+from psycopg2.extras import execute_values
 
 from ..config import config
 from ..db import get_connection, get_cursor
 
 logger = logging.getLogger(__name__)
 
-CHUNK_BATCH_SIZE = 5
+CHUNK_BATCH_SIZE = config.KG_CONCURRENCY
 MIN_RATE = 100  # Minimum chunks/min threshold for performance warning (FR-009/AC-04)
 
 # ---------------------------------------------------------------------------
@@ -745,17 +747,22 @@ def _parse_relationship_text(text: str, edge_type: str, entity_names: list[str])
 # Cross-document consolidation
 # ---------------------------------------------------------------------------
 
+def _trigrams(s: str) -> set[str]:
+    """Generate character trigrams for a string."""
+    s = f"  {s} "
+    return {s[i:i + 3] for i in range(len(s) - 2)}
+
+
 def _consolidate_nodes(nodes: list[dict], workspace_id: str) -> list[dict]:
     """Deduplicate nodes against existing workspace nodes and within the batch.
 
-    Uses SequenceMatcher with a configurable threshold (default 0.8).
-    Near-duplicates get their name remapped to the existing node's name so
-    the SQL ON CONFLICT upsert merges them naturally.
+    Uses exact-match dict lookup as fast path, then trigram pre-filtering to narrow
+    candidates before running SequenceMatcher. Near-duplicates get their name
+    remapped to the existing node's name so the SQL ON CONFLICT upsert merges naturally.
     """
     threshold = config.KG_SIMILARITY_THRESHOLD
 
     # Fetch existing node names from the workspace
-    existing_names = []
     with get_connection() as conn:
         with get_cursor(conn) as cur:
             cur.execute(
@@ -764,46 +771,74 @@ def _consolidate_nodes(nodes: list[dict], workspace_id: str) -> list[dict]:
             )
             existing_names = [row["name"] for row in cur.fetchall()]
 
-    # Build lookup of canonical names (existing + already-consolidated new ones)
-    canonical_names = list(existing_names)
+    # Exact-match index (case-insensitive) for O(1) lookup
+    exact_index: dict[str, str] = {n.lower().strip(): n for n in existing_names}
+
+    # Trigram index: lowered name -> (original name, trigram set)
+    trigram_index: list[tuple[str, str, set[str]]] = [
+        (n, n.lower().strip(), _trigrams(n.lower().strip())) for n in existing_names
+    ]
+
     consolidated = []
 
     for node in nodes:
         name = node["name"]
-        matched = _find_similar_name(name, canonical_names, threshold)
+        name_lower = name.lower().strip()
+
+        # Fast path: exact match
+        if name_lower in exact_index:
+            node["name"] = exact_index[name_lower]
+            consolidated.append(node)
+            continue
+
+        # Trigram pre-filter: only compare candidates sharing enough trigrams
+        matched = _find_similar_name_trigram(name_lower, trigram_index, threshold)
 
         if matched:
             node["name"] = matched
         else:
-            canonical_names.append(name)
+            # Add to indexes for subsequent nodes in this batch
+            exact_index[name_lower] = name
+            trigram_index.append((name, name_lower, _trigrams(name_lower)))
 
         consolidated.append(node)
 
     return consolidated
 
 
-def _find_similar_name(name: str, canonical_names: list[str], threshold: float) -> str | None:
-    """Find a similar canonical name above the threshold."""
-    name_lower = name.lower().strip()
+def _find_similar_name_trigram(
+    name_lower: str,
+    trigram_index: list[tuple[str, str, set[str]]],
+    threshold: float,
+) -> str | None:
+    """Find a similar canonical name using trigram pre-filtering + SequenceMatcher."""
+    if not trigram_index:
+        return None
+
+    name_trigrams = _trigrams(name_lower)
+    # Trigram similarity threshold — candidates with < 30% trigram overlap are skipped
+    trigram_cutoff = 0.3
     best_match = None
     best_ratio = 0.0
 
-    for cname in canonical_names:
-        cname_lower = cname.lower().strip()
-
-        # Exact match (case-insensitive)
-        if name_lower == cname_lower:
-            return cname
+    for orig_name, cname_lower, cname_trigrams in trigram_index:
+        # Trigram Jaccard similarity as cheap pre-filter
+        union_len = len(name_trigrams | cname_trigrams)
+        if union_len == 0:
+            continue
+        jaccard = len(name_trigrams & cname_trigrams) / union_len
+        if jaccard < trigram_cutoff:
+            continue
 
         ratio = SequenceMatcher(None, name_lower, cname_lower).ratio()
 
-        # Substring boost: if one is contained in the other, boost the score
+        # Substring boost
         if name_lower in cname_lower or cname_lower in name_lower:
             ratio = max(ratio, 0.85)
 
         if ratio > best_ratio:
             best_ratio = ratio
-            best_match = cname
+            best_match = orig_name
 
     return best_match if best_ratio >= threshold else None
 
@@ -813,41 +848,60 @@ def _find_similar_name(name: str, canonical_names: list[str], threshold: float) 
 # ---------------------------------------------------------------------------
 
 def _store_nodes(workspace_id: str, document_id: str, nodes: list) -> list[dict]:
-    """Store nodes with deduplication by normalized name + type. Returns list of {name, node_id}."""
+    """Store nodes with deduplication by normalized name + type. Returns list of {name, node_id, chunk_id}."""
+    rows = []
+    node_meta = []  # parallel list to track chunk_id per row
+    for node in nodes:
+        name = node.get("name", "").strip()
+        if not name:
+            continue
+        rows.append((
+            workspace_id,
+            name,
+            name.lower().strip(),
+            node.get("type", "concept"),
+            node.get("subtype"),
+            node.get("confidence", 1.0),
+            node.get("description", ""),
+            json.dumps(node.get("properties", {})),
+        ))
+        node_meta.append({"name": name, "chunk_id": node.get("chunk_id")})
+
+    if not rows:
+        _embed_node_descriptions(workspace_id)
+        return []
+
     stored: list[dict] = []
     with get_connection() as conn:
         with get_cursor(conn) as cur:
-            for node in nodes:
-                name = node.get("name", "").strip()
-                if not name:
-                    continue
-                normalized = name.lower().strip()
-                node_type = node.get("type", "concept")
-                subtype = node.get("subtype")
-                confidence = node.get("confidence", 1.0)
-                description = node.get("description", "")
-                properties = json.dumps(node.get("properties", {}))
-
-                cur.execute("""
-                    INSERT INTO graph_node
-                      (workspace_id, name, normalized_name, node_type, subtype, confidence, description, properties)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
-                    ON CONFLICT (workspace_id, normalized_name, node_type)
-                    DO UPDATE SET source_count = graph_node.source_count + 1,
-                                  subtype = COALESCE(EXCLUDED.subtype, graph_node.subtype),
-                                  confidence = GREATEST(EXCLUDED.confidence, graph_node.confidence),
-                                  description = CASE
-                                    WHEN length(EXCLUDED.description) > length(COALESCE(graph_node.description, ''))
-                                    THEN EXCLUDED.description
-                                    ELSE graph_node.description
-                                  END,
-                                  properties = COALESCE(graph_node.properties, '{}'::jsonb) || EXCLUDED.properties,
-                                  updated_at = now()
-                    RETURNING node_id
-                """, (workspace_id, name, normalized, node_type, subtype, confidence, description, properties))
-                row = cur.fetchone()
-                if row:
-                    stored.append({"name": name, "node_id": row["node_id"], "chunk_id": node.get("chunk_id")})
+            returned = execute_values(
+                cur,
+                """INSERT INTO graph_node
+                     (workspace_id, name, normalized_name, node_type, subtype, confidence, description, properties)
+                   VALUES %s
+                   ON CONFLICT (workspace_id, normalized_name, node_type)
+                   DO UPDATE SET source_count = graph_node.source_count + 1,
+                                 subtype = COALESCE(EXCLUDED.subtype, graph_node.subtype),
+                                 confidence = GREATEST(EXCLUDED.confidence, graph_node.confidence),
+                                 description = CASE
+                                   WHEN length(EXCLUDED.description) > length(COALESCE(graph_node.description, ''))
+                                   THEN EXCLUDED.description
+                                   ELSE graph_node.description
+                                 END,
+                                 properties = COALESCE(graph_node.properties, '{}'::jsonb) || EXCLUDED.properties,
+                                 updated_at = now()
+                   RETURNING node_id""",
+                rows,
+                template="(%s, %s, %s, %s, %s, %s, %s, %s::jsonb)",
+                page_size=500,
+                fetch=True,
+            )
+            for i, ret_row in enumerate(returned or []):
+                stored.append({
+                    "name": node_meta[i]["name"],
+                    "node_id": ret_row[0],
+                    "chunk_id": node_meta[i]["chunk_id"],
+                })
 
     _embed_node_descriptions(workspace_id)
     return stored
@@ -874,57 +928,101 @@ def _embed_node_descriptions(workspace_id: str):
         from .embedder import _get_embeddings
         embeddings = _get_embeddings(texts)
 
+        update_rows = [
+            (str(node_id), "[" + ",".join(str(v) for v in emb) + "]")
+            for node_id, emb in zip(node_ids, embeddings)
+        ]
         with get_connection() as conn:
             with get_cursor(conn) as cur:
-                for node_id, embedding in zip(node_ids, embeddings):
-                    vec_str = "[" + ",".join(str(v) for v in embedding) + "]"
-                    cur.execute("UPDATE graph_node SET description_embedding = %s::vector WHERE node_id = %s",
-                               (vec_str, node_id))
+                execute_values(
+                    cur,
+                    """UPDATE graph_node AS gn
+                       SET description_embedding = v.vec::vector
+                       FROM (VALUES %s) AS v(id, vec)
+                       WHERE gn.node_id = v.id::uuid""",
+                    update_rows,
+                    page_size=500,
+                )
     except Exception as e:
         logger.warning(f"Failed to embed node descriptions: {e}")
 
 
 def _store_edges(workspace_id: str, document_id: str, edges: list) -> list[dict]:
-    """Store edges between existing nodes. Returns list of {edge_id, chunk_id}."""
+    """Store edges between existing nodes. Returns list of {edge_id, chunk_id}.
+
+    Pre-fetches all needed node_ids in a single query, then batch-upserts edges.
+    """
+    if not edges:
+        return []
+
+    # Collect all unique normalized names needed for edge endpoints
+    all_names: set[str] = set()
+    for edge in edges:
+        src = edge.get("source", "").strip().lower()
+        tgt = edge.get("target", "").strip().lower()
+        if src:
+            all_names.add(src)
+        if tgt:
+            all_names.add(tgt)
+
+    if not all_names:
+        return []
+
+    # Single query to fetch all needed node_ids
+    name_to_node_id: dict[str, str] = {}
+    with get_connection() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute("""
+                SELECT DISTINCT ON (normalized_name) normalized_name, node_id
+                FROM graph_node
+                WHERE workspace_id = %s AND normalized_name = ANY(%s)
+            """, (workspace_id, list(all_names)))
+            for row in cur.fetchall():
+                name_to_node_id[row["normalized_name"]] = row["node_id"]
+
+    # Build rows for batch upsert — skip edges where either endpoint is missing
+    upsert_rows = []
+    edge_meta = []
+    for edge in edges:
+        source_name = edge.get("source", "").strip().lower()
+        target_name = edge.get("target", "").strip().lower()
+        if not source_name or not target_name:
+            continue
+        src_id = name_to_node_id.get(source_name)
+        tgt_id = name_to_node_id.get(target_name)
+        if not src_id or not tgt_id:
+            continue
+        upsert_rows.append((
+            workspace_id, str(src_id), str(tgt_id),
+            edge.get("type", "related_to"),
+            edge.get("chunk_id"), document_id,
+        ))
+        edge_meta.append({"chunk_id": edge.get("chunk_id")})
+
+    if not upsert_rows:
+        return []
+
     stored: list[dict] = []
     with get_connection() as conn:
         with get_cursor(conn) as cur:
-            for edge in edges:
-                source_name = edge.get("source", "").strip().lower()
-                target_name = edge.get("target", "").strip().lower()
-                edge_type = edge.get("type", "related_to")
+            returned = execute_values(
+                cur,
+                """INSERT INTO graph_edge
+                     (workspace_id, source_node_id, target_node_id, edge_type,
+                      evidence_chunk_id, document_id)
+                   VALUES %s
+                   ON CONFLICT (workspace_id, source_node_id, target_node_id, edge_type)
+                   DO UPDATE SET weight = LEAST(graph_edge.weight + 0.1, 1.0),
+                                 document_id = EXCLUDED.document_id
+                   RETURNING edge_id""",
+                upsert_rows,
+                template="(%s, %s::uuid, %s::uuid, %s, %s, %s)",
+                page_size=500,
+                fetch=True,
+            )
+            for i, ret_row in enumerate(returned or []):
+                stored.append({"edge_id": ret_row[0], "chunk_id": edge_meta[i]["chunk_id"]})
 
-                if not source_name or not target_name:
-                    continue
-
-                cur.execute("""
-                    SELECT node_id FROM graph_node
-                    WHERE workspace_id = %s AND normalized_name = %s
-                    LIMIT 1
-                """, (workspace_id, source_name))
-                source = cur.fetchone()
-
-                cur.execute("""
-                    SELECT node_id FROM graph_node
-                    WHERE workspace_id = %s AND normalized_name = %s
-                    LIMIT 1
-                """, (workspace_id, target_name))
-                target = cur.fetchone()
-
-                if source and target:
-                    cur.execute("""
-                        INSERT INTO graph_edge (workspace_id, source_node_id, target_node_id, edge_type,
-                                               evidence_chunk_id, document_id)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (workspace_id, source_node_id, target_node_id, edge_type)
-                        DO UPDATE SET weight = LEAST(graph_edge.weight + 0.1, 1.0),
-                                      document_id = EXCLUDED.document_id
-                        RETURNING edge_id
-                    """, (workspace_id, source["node_id"], target["node_id"], edge_type,
-                          edge.get("chunk_id"), document_id))
-                    row = cur.fetchone()
-                    if row:
-                        stored.append({"edge_id": row["edge_id"], "chunk_id": edge.get("chunk_id")})
     return stored
 
 
@@ -934,26 +1032,29 @@ def _store_provenance(
     stored_nodes: list[dict],
     stored_edges: list[dict],
 ):
-    """Write provenance records for extracted nodes and edges."""
+    """Write provenance records for extracted nodes and edges (batch INSERT)."""
     model_name = _get_kg_model_id()
+    rows = [
+        (workspace_id, "NODE", sn["node_id"], sn.get("chunk_id"), document_id, model_name, 1.0)
+        for sn in stored_nodes
+    ] + [
+        (workspace_id, "EDGE", se["edge_id"], se.get("chunk_id"), document_id, model_name, 1.0)
+        for se in stored_edges
+    ]
+    if not rows:
+        return
     try:
         with get_connection() as conn:
             with get_cursor(conn) as cur:
-                for sn in stored_nodes:
-                    cur.execute("""
-                        INSERT INTO kg_provenance
-                          (workspace_id, entity_type, entity_id, source_chunk_id, document_id,
-                           extraction_model, confidence)
-                        VALUES (%s, 'NODE', %s, %s, %s, %s, 1.0)
-                    """, (workspace_id, sn["node_id"], sn.get("chunk_id"), document_id, model_name))
-
-                for se in stored_edges:
-                    cur.execute("""
-                        INSERT INTO kg_provenance
-                          (workspace_id, entity_type, entity_id, source_chunk_id, document_id,
-                           extraction_model, confidence)
-                        VALUES (%s, 'EDGE', %s, %s, %s, %s, 1.0)
-                    """, (workspace_id, se["edge_id"], se.get("chunk_id"), document_id, model_name))
+                execute_values(
+                    cur,
+                    """INSERT INTO kg_provenance
+                         (workspace_id, entity_type, entity_id, source_chunk_id, document_id,
+                          extraction_model, confidence)
+                       VALUES %s""",
+                    rows,
+                    page_size=500,
+                )
     except Exception as e:
         logger.warning(f"Failed to store provenance records: {e}")
 
@@ -1012,10 +1113,38 @@ def _update_document_status(document_id: str, status: str):
 # Main entry point
 # ---------------------------------------------------------------------------
 
+def _extract_chunk_kg(
+    chunk: dict,
+    entity_prompt: str,
+    entity_examples: list,
+    rel_examples: list,
+    valid_types: set,
+    ontology: dict,
+) -> tuple[list[dict], list[dict]]:
+    """Extract KG nodes and edges from a single chunk. Stateless + thread-safe."""
+    content = chunk["content"]
+    chunk_id = chunk["chunk_id"]
+
+    # Pass 1: Entity extraction
+    entity_extractions = _lx_extract(content, entity_prompt, entity_examples)
+    chunk_nodes = _convert_extractions_to_nodes(entity_extractions, chunk_id, valid_types, ontology)
+    chunk_nodes = [n for n in chunk_nodes if n.get("confidence", 0) >= config.KG_CONFIDENCE_THRESHOLD]
+
+    # Pass 2: Relationship extraction (only if >= 2 entities found)
+    chunk_edges: list[dict] = []
+    entity_names = [n["name"] for n in chunk_nodes]
+    if len(entity_names) >= 2:
+        rel_prompt = _build_relationship_prompt(ontology, entity_names)
+        rel_extractions = _lx_extract(content, rel_prompt, rel_examples)
+        chunk_edges = _convert_extractions_to_edges(rel_extractions, chunk_id, entity_names)
+
+    return chunk_nodes, chunk_edges
+
+
 def extract_kg(document_id: str, workspace_id: str):
     """Extract knowledge graph entities and relationships from document chunks.
 
-    Two-pass extraction using LangExtract:
+    Two-pass extraction using LangExtract with concurrent chunk processing:
       Pass 1: Extract entities from each chunk
       Pass 2: Extract relationships using discovered entity names
     """
@@ -1048,39 +1177,34 @@ def extract_kg(document_id: str, workspace_id: str):
     entity_examples = _build_entity_examples()
     rel_examples = _build_relationship_examples()
 
-    all_nodes = []
-    all_edges = []
+    all_nodes: list[dict] = []
+    all_edges: list[dict] = []
     _extract_start = time.time()
+    concurrency = config.KG_CONCURRENCY
 
     for i in range(0, total, CHUNK_BATCH_SIZE):
         batch = chunks[i:i + CHUNK_BATCH_SIZE]
-        for chunk in batch:
-            try:
-                content = chunk["content"]
-                chunk_id = chunk["chunk_id"]
 
-                # Pass 1: Entity extraction
-                entity_extractions = _lx_extract(content, entity_prompt, entity_examples)
-                chunk_nodes = _convert_extractions_to_nodes(entity_extractions, chunk_id, valid_types, ontology)
-                # Filter entities below confidence threshold (FR-009/AC-01)
-                chunk_nodes = [n for n in chunk_nodes if n.get("confidence", 0) >= config.KG_CONFIDENCE_THRESHOLD]
-                all_nodes.extend(chunk_nodes)
-
-                # Pass 2: Relationship extraction (only if ≥2 entities found)
-                entity_names = [n["name"] for n in chunk_nodes]
-                if len(entity_names) >= 2:
-                    rel_prompt = _build_relationship_prompt(ontology, entity_names)
-                    rel_extractions = _lx_extract(content, rel_prompt, rel_examples)
-                    chunk_edges = _convert_extractions_to_edges(rel_extractions, chunk_id, entity_names)
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            futures = {
+                executor.submit(
+                    _extract_chunk_kg, chunk,
+                    entity_prompt, entity_examples, rel_examples,
+                    valid_types, ontology,
+                ): chunk
+                for chunk in batch
+            }
+            for future in as_completed(futures):
+                chunk = futures[future]
+                try:
+                    chunk_nodes, chunk_edges = future.result()
+                    all_nodes.extend(chunk_nodes)
                     all_edges.extend(chunk_edges)
-
-            except Exception as e:
-                logger.warning(f"KG extraction failed for chunk {chunk['chunk_id']}: {e}")
-                continue
+                except Exception as e:
+                    logger.warning(f"KG extraction failed for chunk {chunk['chunk_id']}: {e}")
 
         batch_num = i // CHUNK_BATCH_SIZE + 1
         total_batches = (total + CHUNK_BATCH_SIZE - 1) // CHUNK_BATCH_SIZE
-        # Rate measurement logging (FR-009/AC-04)
         elapsed = time.time() - _extract_start
         rate = (i + len(batch)) / elapsed if elapsed > 0 else 0
         rate_per_min = rate * 60

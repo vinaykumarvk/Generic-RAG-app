@@ -10,7 +10,7 @@ class Config:
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
     STORAGE_BASE_DIR: str = os.getenv("STORAGE_BASE_DIR", "./uploads")
     POLL_INTERVAL_S: int = int(os.getenv("WORKER_POLL_INTERVAL_S", "2"))
-    POLLER_THREADS: int = max(1, int(os.getenv("WORKER_POLLER_THREADS", "1")))
+    POLLER_THREADS: int = max(1, int(os.getenv("WORKER_POLLER_THREADS", "4")))
     BATCH_SIZE: int = int(os.getenv("WORKER_BATCH_SIZE", "5"))
     MAX_RETRIES: int = int(os.getenv("WORKER_MAX_RETRIES", "3"))
     DB_POOL_MAXCONN: int = max(5, int(os.getenv("WORKER_DB_POOL_MAXCONN", str(max(5, POLLER_THREADS * 3)))))
@@ -49,6 +49,7 @@ class Config:
         "KG_MODEL_ID",
         GEMINI_MODEL if KG_LLM_PROVIDER == "gemini" else OPENAI_CHAT_MODEL,
     )
+    KG_CONCURRENCY: int = max(1, int(os.getenv("KG_CONCURRENCY", "8")))
     KG_SIMILARITY_THRESHOLD: float = float(os.getenv("KG_SIMILARITY_THRESHOLD", "0.90"))
     KG_EXTRACTION_TEMPERATURE: float = float(os.getenv("KG_EXTRACTION_TEMPERATURE", "0.2"))
     KG_MAX_ENTITIES_FOR_RELS: int = int(os.getenv("KG_MAX_ENTITIES_FOR_RELS", "30"))
