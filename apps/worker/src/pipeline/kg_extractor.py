@@ -916,9 +916,11 @@ def _store_nodes(workspace_id: str, document_id: str, nodes: list) -> list[dict]
                 fetch=True,
             )
             for i, ret_row in enumerate(returned or []):
+                # execute_values + RealDictCursor returns dicts; plain cursor returns tuples
+                node_id = ret_row["node_id"] if isinstance(ret_row, dict) else ret_row[0]
                 stored.append({
                     "name": node_meta[i]["name"],
-                    "node_id": ret_row[0],
+                    "node_id": node_id,
                     "chunk_id": node_meta[i]["chunk_id"],
                 })
 
@@ -1053,7 +1055,8 @@ def _store_edges(workspace_id: str, document_id: str, edges: list) -> list[dict]
                 fetch=True,
             )
             for i, ret_row in enumerate(returned or []):
-                stored.append({"edge_id": ret_row[0], "chunk_id": edge_meta[i]["chunk_id"]})
+                edge_id = ret_row["edge_id"] if isinstance(ret_row, dict) else ret_row[0]
+                stored.append({"edge_id": edge_id, "chunk_id": edge_meta[i]["chunk_id"]})
 
     return stored
 
