@@ -871,6 +871,25 @@ def _store_nodes(workspace_id: str, document_id: str, nodes: list) -> list[dict]
         _embed_node_descriptions(workspace_id)
         return []
 
+    # Deduplicate rows by (normalized_name, node_type) to avoid
+    # "ON CONFLICT DO UPDATE cannot affect row a second time" error.
+    seen: dict[tuple, int] = {}  # (normalized_name, node_type) -> index in deduped lists
+    deduped_rows = []
+    deduped_meta = []
+    for i, row in enumerate(rows):
+        key = (row[2], row[3])  # (normalized_name, node_type)
+        if key in seen:
+            # Keep entry with longer description
+            existing_idx = seen[key]
+            if len(row[6]) > len(deduped_rows[existing_idx][6]):
+                deduped_rows[existing_idx] = row
+        else:
+            seen[key] = len(deduped_rows)
+            deduped_rows.append(row)
+            deduped_meta.append(node_meta[i])
+    rows = deduped_rows
+    node_meta = deduped_meta
+
     stored: list[dict] = []
     with get_connection() as conn:
         with get_cursor(conn) as cur:
@@ -1001,6 +1020,19 @@ def _store_edges(workspace_id: str, document_id: str, edges: list) -> list[dict]
 
     if not upsert_rows:
         return []
+
+    # Deduplicate by (source_node_id, target_node_id, edge_type)
+    seen_edges: dict[tuple, int] = {}
+    deduped_rows = []
+    deduped_meta = []
+    for i, row in enumerate(upsert_rows):
+        key = (row[1], row[2], row[3])  # (src_id, tgt_id, edge_type)
+        if key not in seen_edges:
+            seen_edges[key] = len(deduped_rows)
+            deduped_rows.append(row)
+            deduped_meta.append(edge_meta[i])
+    upsert_rows = deduped_rows
+    edge_meta = deduped_meta
 
     stored: list[dict] = []
     with get_connection() as conn:
