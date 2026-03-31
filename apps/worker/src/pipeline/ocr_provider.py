@@ -96,8 +96,8 @@ def ocr_pdf(file_path: str, document_id: str) -> tuple:
             )
         except Exception as exc:
             logger.warning(
-                "Document AI OCR failed, falling back to pytesseract",
-                extra={"document_id": document_id, "file_path": file_path, "error": str(exc)},
+                "Document AI OCR failed (error=%s), falling back to pytesseract", exc,
+                extra={"document_id": document_id, "file_path": file_path},
             )
 
     text, page_count = _ocr_pytesseract_pdf(file_path)
@@ -137,8 +137,8 @@ def ocr_pdf_pages(file_path: str, document_id: str, page_indices: list) -> dict:
             return page_results
         except Exception as exc:
             logger.warning(
-                "Document AI per-page OCR failed, falling back to pytesseract",
-                extra={"document_id": document_id, "file_path": file_path, "error": str(exc)},
+                "Document AI per-page OCR failed (error=%s), falling back to pytesseract", exc,
+                extra={"document_id": document_id, "file_path": file_path},
             )
 
     page_results = _ocr_pytesseract_pdf_pages(file_path, page_indices)
@@ -161,8 +161,8 @@ def ocr_image(file_path: str, document_id: str, mime_type: str) -> tuple:
             )
         except Exception as exc:
             logger.warning(
-                "Document AI image OCR failed, falling back to pytesseract",
-                extra={"document_id": document_id, "file_path": file_path, "error": str(exc)},
+                "Document AI image OCR failed (error=%s), falling back to pytesseract", exc,
+                extra={"document_id": document_id, "file_path": file_path},
             )
 
     text, page_count = _ocr_pytesseract_image(file_path)
