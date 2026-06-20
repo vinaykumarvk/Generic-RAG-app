@@ -55,8 +55,8 @@ export const KgOntologySchema = z.object({
 export type KgOntology = z.infer<typeof KgOntologySchema>;
 
 export const WorkspaceSettingsSchema = z.object({
-  embeddingModel: z.string().default("nomic-embed-text"),
-  embeddingDimensions: z.number().int().default(768),
+  embeddingModel: z.string().default("text-embedding-3-large"),
+  embeddingDimensions: z.number().int().default(1536),
   chunkSize: z.number().int().default(700),
   chunkOverlap: z.number().default(0.12),
   maxFileBytes: z.number().int().default(52_428_800),
@@ -80,8 +80,8 @@ export const WorkspaceSchema = z.object({
   description: z.string().optional(),
   status: WorkspaceStatusSchema.default("ACTIVE"),
   settings: WorkspaceSettingsSchema.default({
-    embeddingModel: "nomic-embed-text",
-    embeddingDimensions: 768,
+    embeddingModel: "text-embedding-3-large",
+    embeddingDimensions: 1536,
     chunkSize: 700,
     chunkOverlap: 0.12,
     maxFileBytes: 52_428_800,

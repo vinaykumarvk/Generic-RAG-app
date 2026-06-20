@@ -20,7 +20,7 @@ export const GraphNodeSchema = z.object({
   confidence: z.number().min(0).max(1).default(1.0),
   sensitivity_level: SensitivityLevelSchema.default("NONE"),
   aliases: z.array(z.string()).default([]),
-  // description_embedding stored as vector(768) in PostgreSQL
+  // description_embedding stored as vector(1536) in PostgreSQL
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
 });

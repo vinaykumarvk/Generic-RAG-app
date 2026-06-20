@@ -229,7 +229,7 @@ async function bootstrapProviders(queryFn: (text: string, params?: unknown[]) =>
       }
     }
 
-    // Assign OpenAI provider to EMBEDDING if not already assigned (matches stored 768-dim vectors)
+    // Assign OpenAI provider to EMBEDDING if not already assigned (matches stored 1536-dim vectors)
     const openai = await queryFn(
       `SELECT config_id, config_jsonb FROM llm_provider_config
        WHERE provider = 'openai' AND api_base_url LIKE '%api.openai.com%' AND is_active = TRUE LIMIT 1`,
@@ -245,13 +245,13 @@ async function bootstrapProviders(queryFn: (text: string, params?: unknown[]) =>
           [
             JSON.stringify({
               assigned_use_cases: [...useCases, "EMBEDDING"],
-              embedding_model: "text-embedding-3-small",
-              embedding_dimensions: 768,
+              embedding_model: "text-embedding-3-large",
+              embedding_dimensions: 1536,
             }),
             row.config_id,
           ],
         );
-        logInfo("Bootstrap: OpenAI provider assigned to EMBEDDING (768-dim)");
+        logInfo("Bootstrap: OpenAI provider assigned to EMBEDDING (1536-dim)");
       }
     }
   } catch (err) {

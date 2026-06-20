@@ -89,7 +89,7 @@ CREATE TABLE answer_cache (
   cache_id        UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   workspace_id    UUID NOT NULL REFERENCES workspace(workspace_id) ON DELETE CASCADE,
   query_text      TEXT NOT NULL,
-  query_embedding vector(768),
+  query_embedding vector(1536),
   answer_text     TEXT NOT NULL,
   citations       JSONB NOT NULL DEFAULT '[]',
   preset          TEXT NOT NULL DEFAULT 'balanced',

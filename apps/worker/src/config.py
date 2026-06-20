@@ -21,7 +21,7 @@ class Config:
     CHUNK_OVERLAP: float = float(os.getenv("CHUNK_OVERLAP", "0.12"))
     CHUNKING_STRATEGY: str = os.getenv("CHUNKING_STRATEGY", "fixed")
     SEMANTIC_SIMILARITY_THRESHOLD: float = float(os.getenv("SEMANTIC_SIMILARITY_THRESHOLD", "0.3"))
-    EMBEDDING_DIMENSIONS: int = int(os.getenv("OLLAMA_EMBEDDING_DIMENSIONS", "768"))
+    EMBEDDING_DIMENSIONS: int = int(os.getenv("OLLAMA_EMBEDDING_DIMENSIONS", "1536"))
 
     # LLM provider: "openai" or "ollama"
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai" if OPENAI_KEY else "ollama")
@@ -34,7 +34,7 @@ class Config:
     # OpenAI
     OPENAI_API_KEY: str = OPENAI_KEY
     OPENAI_CHAT_MODEL: str = os.getenv("OPEN_AI_MODEL", "gpt-4o")
-    OPENAI_EMBEDDING_MODEL: str = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+    OPENAI_EMBEDDING_MODEL: str = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large")
 
     # Gemini
     GEMINI_API_KEY: str = GEMINI_KEY

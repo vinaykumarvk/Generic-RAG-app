@@ -54,7 +54,7 @@ export const AnswerCacheSchema = z.object({
   cache_id: z.string().uuid(),
   workspace_id: z.string().uuid(),
   query_text: z.string(),
-  // query_embedding stored as vector(768) in PostgreSQL
+  // query_embedding stored as vector(1536) in PostgreSQL
   answer_text: z.string(),
   citations: z.array(z.object({
     chunk_id: z.string(),

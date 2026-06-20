@@ -21,7 +21,7 @@ export const ChunkSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).default({}),
   content_hash: z.string().optional(),
   ocr_confidence: z.number().min(0).max(1).optional(),
-  // embedding stored as vector(768) in PostgreSQL — not in Zod
+  // embedding stored as vector(1536) in PostgreSQL — not in Zod
   fts_vector: z.string().optional(), // tsvector representation
   created_at: z.string().datetime(),
 });
