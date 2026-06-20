@@ -31,6 +31,8 @@ import { createReviewQueueRoutes } from "./routes/review-queue-routes";
 import { createNotificationRoutes } from "./routes/notification-routes";
 import { createAuditRoutes } from "./routes/audit-routes";
 import { createIngestionRoutes } from "./routes/ingestion-routes";
+import { createDistrictSourceRoutes } from "./routes/district-source-routes";
+import { createDistrictAnalyticsRoutes } from "./routes/district-analytics-routes";
 import { createWorkspaceMemberGuard } from "./middleware/workspace-guard";
 import { createStorageProvider } from "./storage";
 
@@ -85,7 +87,7 @@ function validateEnv(): void {
 async function bootstrapAdmin(queryFn: (text: string, params?: unknown[]) => Promise<{ rows: unknown[] }>): Promise<void> {
   try {
     const email = process.env.ADMIN_EMAIL || "admin@intellirag.local";
-    const password = process.env.ADMIN_PASSWORD || "Admin123!";
+    const password = process.env.ADMIN_PASSWORD || "password123";
     const hash = await hashPassword(password);
 
     const adminCheck = await queryFn(
@@ -229,7 +231,7 @@ async function bootstrapProviders(queryFn: (text: string, params?: unknown[]) =>
       }
     }
 
-    // Assign OpenAI provider to EMBEDDING if not already assigned (matches stored 768-dim vectors)
+    // Assign OpenAI provider to EMBEDDING if not already assigned (matches stored 1536-dim vectors)
     const openai = await queryFn(
       `SELECT config_id, config_jsonb FROM llm_provider_config
        WHERE provider = 'openai' AND api_base_url LIKE '%api.openai.com%' AND is_active = TRUE LIMIT 1`,
@@ -245,13 +247,13 @@ async function bootstrapProviders(queryFn: (text: string, params?: unknown[]) =>
           [
             JSON.stringify({
               assigned_use_cases: [...useCases, "EMBEDDING"],
-              embedding_model: "text-embedding-3-small",
-              embedding_dimensions: 768,
+              embedding_model: "text-embedding-3-large",
+              embedding_dimensions: 1536,
             }),
             row.config_id,
           ],
         );
-        logInfo("Bootstrap: OpenAI provider assigned to EMBEDDING (768-dim)");
+        logInfo("Bootstrap: OpenAI provider assigned to EMBEDDING (1536-dim)");
       }
     }
   } catch (err) {
@@ -298,10 +300,18 @@ async function main() {
   const getClient = async () => pool.connect();
 
   // Bootstrap admin if no admin exists (FR-001)
-  await bootstrapAdmin(queryFn);
+  if (isTruthy(process.env.SKIP_BOOTSTRAP_ADMIN)) {
+    logWarn("Bootstrap admin skipped by SKIP_BOOTSTRAP_ADMIN");
+  } else {
+    await bootstrapAdmin(queryFn);
+  }
 
   // Bootstrap LLM providers (Qwen/OpenRouter default, Gemini → KG_EXTRACTION)
-  await bootstrapProviders(queryFn);
+  if (isTruthy(process.env.SKIP_BOOTSTRAP_PROVIDERS)) {
+    logWarn("Bootstrap providers skipped by SKIP_BOOTSTRAP_PROVIDERS");
+  } else {
+    await bootstrapProviders(queryFn);
+  }
 
   const llmProvider = createLlmProvider({ queryFn });
 
@@ -366,6 +376,8 @@ async function main() {
       createNotificationRoutes(app, deps);
       createAuditRoutes(app, deps);
       createIngestionRoutes(app, deps);
+      createDistrictSourceRoutes(app, deps);
+      createDistrictAnalyticsRoutes(app, deps);
     },
   });
 

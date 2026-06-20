@@ -92,7 +92,7 @@ CREATE TABLE chunk (
   page_end      INTEGER,
   heading_path  TEXT,
   metadata      JSONB NOT NULL DEFAULT '{}',
-  embedding     vector(768),
+  embedding     vector(1536),
   fts_vector    tsvector,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );

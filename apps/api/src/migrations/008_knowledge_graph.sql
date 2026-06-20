@@ -14,7 +14,7 @@ CREATE TABLE graph_node (
   description           TEXT,
   properties            JSONB NOT NULL DEFAULT '{}',
   source_count          INTEGER NOT NULL DEFAULT 1,
-  description_embedding vector(768),
+  description_embedding vector(1536),
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
