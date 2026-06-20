@@ -166,6 +166,24 @@ def _get_workspace_ontology(workspace_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Ontology helpers
+# ---------------------------------------------------------------------------
+
+def _is_closed_schema_ontology(ontology: dict) -> bool:
+    """Whether the workspace ontology forbids out-of-ontology types."""
+    return bool(ontology.get("closedSchema"))
+
+
+def _format_ontology_rules(ontology: dict) -> str:
+    """Render ontology extraction rules for prompts without overwhelming them."""
+    rules = ontology.get("extractionRules") or []
+    if not isinstance(rules, list):
+        return ""
+    rendered = [f"- {rule}" for rule in rules if isinstance(rule, str) and rule.strip()]
+    return "\n".join(rendered[:12])
+
+
+# ---------------------------------------------------------------------------
 # Prompt builders
 # ---------------------------------------------------------------------------
 
@@ -174,15 +192,20 @@ def _build_entity_prompt(ontology: dict) -> str:
     type_descriptions = "\n".join(
         f"  - {nt['type']}: {nt.get('label', nt['type'])}" for nt in ontology.get("nodeTypes", [])
     )
+    ontology_rules = _format_ontology_rules(ontology)
+    additional_rules = f"\nOntology-specific rules:\n{ontology_rules}\n" if ontology_rules else ""
     return (
         "Extract all named entities from the following text. "
         "For each entity, provide its name, type, and a brief description.\n\n"
         f"Entity types:\n{type_descriptions}\n\n"
         "Rules:\n"
-        "- Only use the entity types listed above\n"
+        "- Only use the entity types listed above; copy the type identifier exactly\n"
+        "- The name must be the concise entity itself, NOT a sentence or description\n"
         "- Normalize entity names (capitalize properly, remove redundancy)\n"
+        "- Put any explanation in the description field, not the name\n"
         "- Each entity must have a brief description (1-2 sentences)\n"
         "- Be thorough — extract every meaningful entity mentioned\n"
+        f"{additional_rules}"
     )
 
 
@@ -192,16 +215,30 @@ def _build_relationship_prompt(ontology: dict, entity_names: list[str]) -> str:
         f"  - {et['type']}: {et.get('label', et['type'])}" for et in ontology.get("edgeTypes", [])
     )
     entity_list = ", ".join(entity_names[:config.KG_MAX_ENTITIES_FOR_RELS])
+    ontology_rules = _format_ontology_rules(ontology)
+    additional_rules = f"\nOntology-specific rules:\n{ontology_rules}\n" if ontology_rules else ""
+    if _is_closed_schema_ontology(ontology):
+        type_rule = (
+            "- Only use the relationship types listed above. Do not introduce new "
+            "relationship types; omit relationships when no listed type fits\n"
+        )
+    else:
+        type_rule = "- Prefer the relationship types listed above, but introduce new ones if needed\n"
     return (
         "Extract all relationships between the entities listed below from the text. "
-        "For each relationship, provide the source entity, target entity, relationship type, "
-        "and a brief description of the relationship.\n\n"
+        "For each relationship, the extraction_text must state the relationship as "
+        "'<source entity> <relationship> <target entity>', the extraction_class must be "
+        "the relationship type identifier (copied exactly from the list below), and the "
+        "description must briefly justify it.\n\n"
         f"Known entities: {entity_list}\n\n"
         f"Relationship types:\n{edge_descriptions}\n\n"
         "Rules:\n"
         "- Only create relationships between the entities listed above\n"
-        "- Prefer the relationship types listed above, but introduce new ones if needed\n"
+        f"{type_rule}"
+        "- The relationship type goes in extraction_class, never the words "
+        "'source_entity', 'target_entity', or 'description'\n"
         "- Each relationship must have a brief evidence description\n"
+        f"{additional_rules}"
     )
 
 
@@ -573,32 +610,60 @@ def _lx_extract(content: str, prompt: str, examples: list) -> list:
         return _extract_with_direct_json_fallback(content, prompt, examples)
 
 
+def _normalize_type_token(value: str) -> str:
+    """Normalize a type identifier for tolerant matching.
+
+    Lowercases and strips separators so ontology types declared in any casing
+    (e.g. 'LandUseZone', 'land_use_zone', 'Land Use Zone') match the LLM's
+    classification regardless of how it cased or punctuated it.
+    """
+    return "".join(ch for ch in (value or "").lower() if ch.isalnum())
+
+
+def _build_valid_type_index(valid_types: set) -> dict[str, str]:
+    """Map normalized type tokens to their canonical ontology spelling."""
+    return {_normalize_type_token(t): t for t in valid_types}
+
+
 def _map_entity_type(extracted_text: str, classification: str, valid_types: set) -> str:
     """Map an extraction classification to a valid ontology type.
 
-    If the classification is already valid, use it directly.
-    Otherwise, use keyword matching on the extracted text and classification
-    to find the best ontology type. Falls back to 'concept'.
+    Matching is tolerant of casing and separators so an ontology type such as
+    'LandUseZone' is honored even when the model returns 'land use zone'. If the
+    classification cannot be matched, fall back to keyword matching on the text,
+    and finally to the first available type (or 'concept').
     """
+    type_index = _build_valid_type_index(valid_types)
+
+    # Exact (canonical) match first, then normalized match.
     if classification in valid_types:
         return classification
+    canonical = type_index.get(_normalize_type_token(classification))
+    if canonical:
+        return canonical
 
     # Try keyword matching against the text + classification
     search_text = f"{extracted_text} {classification}".lower()
-    best_type = "concept"
+    best_type = None
     best_score = 0
 
     for node_type, keywords in _TYPE_KEYWORDS.items():
-        if node_type not in valid_types:
+        canonical_node = type_index.get(_normalize_type_token(node_type))
+        if canonical_node is None:
             continue
         for kw in keywords:
             if kw in search_text:
                 score = len(kw)
                 if score > best_score:
                     best_score = score
-                    best_type = node_type
+                    best_type = canonical_node
 
-    return best_type
+    if best_type:
+        return best_type
+
+    # Final fallback: prefer ontology's own 'concept' if present, otherwise the
+    # first declared type, otherwise the literal 'concept'.
+    return type_index.get("concept") or (sorted(valid_types)[0] if valid_types else "concept")
 
 
 def _infer_subtype(name: str, node_type: str, ontology: dict) -> str | None:
@@ -627,6 +692,48 @@ def _compute_extraction_confidence(ext) -> float:
     return min(conf, 1.0)
 
 
+def _split_name_and_description(raw_text: str, description: str) -> tuple[str, str]:
+    """Separate a concise entity name from a descriptive sentence.
+
+    The model sometimes returns a full descriptive sentence as the entity
+    'name'. When the extracted text is sentence-like, keep a concise leading
+    phrase as the name and preserve the full text as the description (only if
+    no description was already provided), preventing name/description conflation.
+    """
+    text = (raw_text or "").strip()
+    desc = (description or "").strip()
+    if not text:
+        return text, desc
+
+    # Heuristic: a name should be a short noun phrase, not a sentence.
+    word_count = len(text.split())
+    sentence_like = text.endswith((".", "!", "?")) or word_count > 8
+
+    if not sentence_like:
+        return text, desc
+
+    # Derive a concise name: take the leading clause before sentence/clause
+    # punctuation, then cap length.
+    candidate = text
+    for sep in (". ", "; ", ", ", " — ", " - ", ": "):
+        if sep in candidate:
+            candidate = candidate.split(sep, 1)[0]
+            break
+    candidate = candidate.rstrip(".!?").strip()
+    # Still too long? fall back to the first few words.
+    if len(candidate.split()) > 8:
+        candidate = " ".join(candidate.split()[:8])
+
+    if not candidate:
+        candidate = text[:120].rstrip()
+
+    # Preserve the original full text as the description when none was given.
+    if not desc:
+        desc = text
+
+    return candidate, desc
+
+
 def _convert_extractions_to_nodes(
     extractions: list, chunk_id: str, valid_types: set, ontology: dict | None = None,
 ) -> list[dict]:
@@ -634,7 +741,10 @@ def _convert_extractions_to_nodes(
     ont = ontology or {}
     nodes = []
     for ext in extractions:
-        name = ext.extraction_text.strip()
+        raw_name = ext.extraction_text.strip()
+        if not raw_name:
+            continue
+        name, description = _split_name_and_description(raw_name, ext.description or "")
         if not name:
             continue
         node_type = _map_entity_type(name, ext.extraction_class or "", valid_types)
@@ -645,7 +755,7 @@ def _convert_extractions_to_nodes(
             "type": node_type,
             "subtype": subtype,
             "confidence": confidence,
-            "description": ext.description or "",
+            "description": description,
             "chunk_id": chunk_id,
             "properties": {},
         }
@@ -676,18 +786,73 @@ def _match_entity_name(name_fragment: str, entity_names: list[str]) -> str | Non
     return best_name if best_ratio >= 0.6 else None
 
 
-def _convert_extractions_to_edges(extractions: list, chunk_id: str, entity_names: list[str]) -> list[dict]:
+# Field names the model sometimes leaks as a relationship "type" when it
+# flattens the requested {source_entity, target_entity, relationship_type,
+# description} shape into separate extractions. These are never valid edge types.
+_NON_EDGE_TYPE_TOKENS = {
+    "source_entity", "target_entity", "source", "target",
+    "relationship_type", "relationship", "type", "description", "evidence",
+}
+
+
+def _normalize_edge_type(
+    edge_type: str,
+    valid_edge_types: set | None,
+    closed_schema: bool,
+    chunk_id: str,
+) -> str | None:
+    """Validate/normalize a relationship type against the ontology.
+
+    - Rejects leaked field-name tokens (source_entity/target_entity/description).
+    - Matches ontology edge types tolerant of casing/separators.
+    - In closed-schema ontologies, drops out-of-ontology types; otherwise maps
+      them to 'related_to' when that type exists, else keeps the raw type.
+    Returns the canonical edge type, or None if the edge should be dropped.
+    """
+    raw = (edge_type or "").strip()
+    if not raw or _normalize_type_token(raw) in {_normalize_type_token(t) for t in _NON_EDGE_TYPE_TOKENS}:
+        logger.warning("Dropped malformed relationship type '%s' for chunk %s", edge_type, chunk_id)
+        return None
+
+    if not valid_edge_types:
+        return raw
+
+    edge_index = _build_valid_type_index(valid_edge_types)
+    canonical = edge_index.get(_normalize_type_token(raw))
+    if canonical:
+        return canonical
+
+    # Not in the ontology.
+    if closed_schema:
+        logger.warning("Rejected out-of-ontology edge type '%s' for chunk %s", edge_type, chunk_id)
+        return None
+    return edge_index.get(_normalize_type_token("related_to")) or raw
+
+
+def _convert_extractions_to_edges(
+    extractions: list,
+    chunk_id: str,
+    entity_names: list[str],
+    valid_edge_types: set | None = None,
+    closed_schema: bool = False,
+) -> list[dict]:
     """Convert LangExtract relationship Extraction objects into edge dicts.
 
     The extracted_text for relationships is expected to contain source and target
     entity names (e.g. "Entity A produces Entity B"). We split on the classification
-    keyword and fuzzy-match to known entities.
+    keyword and fuzzy-match to known entities. The relationship type comes from the
+    extraction class and is validated/normalized against the ontology.
     """
     edges = []
     for ext in extractions:
         text = ext.extraction_text.strip()
-        edge_type = ext.extraction_class or "related_to"
         description = ext.description or ""
+
+        edge_type = _normalize_edge_type(
+            ext.extraction_class or "related_to", valid_edge_types, closed_schema, chunk_id,
+        )
+        if edge_type is None:
+            continue
 
         # Try to split the extracted text to find source and target entities
         source_name, target_name = _parse_relationship_text(text, edge_type, entity_names)
@@ -1154,6 +1319,8 @@ def _extract_chunk_kg(
     entity_examples: list,
     rel_examples: list,
     valid_types: set,
+    valid_edge_types: set,
+    closed_schema: bool,
     ontology: dict,
 ) -> tuple[list[dict], list[dict]]:
     """Extract KG nodes and edges from a single chunk. Stateless + thread-safe."""
@@ -1171,7 +1338,9 @@ def _extract_chunk_kg(
     if len(entity_names) >= 2:
         rel_prompt = _build_relationship_prompt(ontology, entity_names)
         rel_extractions = _lx_extract(content, rel_prompt, rel_examples)
-        chunk_edges = _convert_extractions_to_edges(rel_extractions, chunk_id, entity_names)
+        chunk_edges = _convert_extractions_to_edges(
+            rel_extractions, chunk_id, entity_names, valid_edge_types, closed_schema,
+        )
 
     return chunk_nodes, chunk_edges
 
@@ -1208,6 +1377,8 @@ def extract_kg(document_id: str, workspace_id: str):
     logger.info(f"Extracting KG from {total} chunks for document {document_id}")
 
     valid_types = {nt["type"] for nt in ontology.get("nodeTypes", [])}
+    valid_edge_types = {et["type"] for et in ontology.get("edgeTypes", [])}
+    closed_schema = _is_closed_schema_ontology(ontology)
     entity_prompt = _build_entity_prompt(ontology)
     entity_examples = _build_entity_examples()
     rel_examples = _build_relationship_examples()
@@ -1225,7 +1396,7 @@ def extract_kg(document_id: str, workspace_id: str):
                 executor.submit(
                     _extract_chunk_kg, chunk,
                     entity_prompt, entity_examples, rel_examples,
-                    valid_types, ontology,
+                    valid_types, valid_edge_types, closed_schema, ontology,
                 ): chunk
                 for chunk in batch
             }

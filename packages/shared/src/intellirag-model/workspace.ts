@@ -43,15 +43,21 @@ export const KgEdgeTypeDefSchema = z.object({
 export type KgEdgeTypeDef = z.infer<typeof KgEdgeTypeDefSchema>;
 
 export const KgOntologySchema = z.object({
+  version: z.string().optional(),
+  domain: z.string().optional(),
+  description: z.string().optional(),
+  closedSchema: z.boolean().optional(),
   nodeTypes: z.array(KgNodeTypeDefSchema),
   edgeTypes: z.array(KgEdgeTypeDefSchema),
   assertionTypes: z.array(z.string()).optional(),
+  extractionRules: z.array(z.string()).optional(),
+  answerUseGuidance: z.array(z.string()).optional(),
   extractionTemplates: z.record(z.string(), z.object({
     prompt: z.string(),
     examples: z.array(z.string()).optional(),
   })).optional(),
   controlledVocabularies: z.record(z.string(), z.array(z.string())).optional(),
-});
+}).passthrough();
 export type KgOntology = z.infer<typeof KgOntologySchema>;
 
 export const WorkspaceSettingsSchema = z.object({
