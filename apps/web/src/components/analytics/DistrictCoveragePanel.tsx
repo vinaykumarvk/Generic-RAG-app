@@ -123,14 +123,14 @@ export function DistrictCoveragePanel({ workspaceId, queryString }: { workspaceI
             <table className="w-full text-sm">
               <thead className="bg-surface-alt text-xs text-skin-muted">
                 <tr>
-                  <th className="text-left px-4 py-2 font-medium">State</th>
-                  <th className="text-left px-4 py-2 font-medium">District</th>
-                  <th className="text-left px-4 py-2 font-medium">Court</th>
-                  <th className="text-left px-4 py-2 font-medium">Language</th>
-                  <th className="text-left px-4 py-2 font-medium">Source</th>
-                  <th className="text-right px-4 py-2 font-medium">Cases</th>
-                  <th className="text-right px-4 py-2 font-medium">Text</th>
-                  <th className="text-right px-4 py-2 font-medium">Translated</th>
+                  <th scope="col" className="text-left px-4 py-2 font-medium">State</th>
+                  <th scope="col" className="text-left px-4 py-2 font-medium">District</th>
+                  <th scope="col" className="text-left px-4 py-2 font-medium">Court</th>
+                  <th scope="col" className="text-left px-4 py-2 font-medium">Language</th>
+                  <th scope="col" className="text-left px-4 py-2 font-medium">Source</th>
+                  <th scope="col" className="text-right px-4 py-2 font-medium">Cases</th>
+                  <th scope="col" className="text-right px-4 py-2 font-medium">Text</th>
+                  <th scope="col" className="text-right px-4 py-2 font-medium">Translated</th>
                 </tr>
               </thead>
               <tbody>

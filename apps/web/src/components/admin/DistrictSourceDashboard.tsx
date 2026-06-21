@@ -71,14 +71,14 @@ export function DistrictSourceDashboard({ workspaceId, queryString }: { workspac
         <table className="w-full text-sm">
           <thead className="bg-surface-alt text-xs text-skin-muted">
             <tr>
-              <th className="text-left px-4 py-2 font-medium">Source</th>
-              <th className="text-left px-4 py-2 font-medium">License</th>
-              <th className="text-right px-4 py-2 font-medium">Cases</th>
-              <th className="text-right px-4 py-2 font-medium">Text</th>
-              <th className="text-right px-4 py-2 font-medium">Translated</th>
-              <th className="text-right px-4 py-2 font-medium">Queue</th>
-              <th className="text-right px-4 py-2 font-medium">Attempts</th>
-              <th className="text-right px-4 py-2 font-medium">Failures</th>
+              <th scope="col" className="text-left px-4 py-2 font-medium">Source</th>
+              <th scope="col" className="text-left px-4 py-2 font-medium">License</th>
+              <th scope="col" className="text-right px-4 py-2 font-medium">Cases</th>
+              <th scope="col" className="text-right px-4 py-2 font-medium">Text</th>
+              <th scope="col" className="text-right px-4 py-2 font-medium">Translated</th>
+              <th scope="col" className="text-right px-4 py-2 font-medium">Queue</th>
+              <th scope="col" className="text-right px-4 py-2 font-medium">Attempts</th>
+              <th scope="col" className="text-right px-4 py-2 font-medium">Failures</th>
             </tr>
           </thead>
           <tbody>

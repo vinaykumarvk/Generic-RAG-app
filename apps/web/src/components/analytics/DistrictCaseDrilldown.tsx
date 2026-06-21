@@ -262,12 +262,12 @@ export function DistrictCaseDrilldown({ workspaceId, queryString }: { workspaceI
           <table className="w-full text-sm">
             <thead className="bg-surface-alt text-xs text-skin-muted">
               <tr>
-                <th className="text-left px-4 py-2 font-medium">Case</th>
-                <th className="text-left px-4 py-2 font-medium">Place</th>
-                <th className="text-left px-4 py-2 font-medium">Court</th>
-                <th className="text-left px-4 py-2 font-medium">Sections</th>
-                <th className="text-left px-4 py-2 font-medium">Decision</th>
-                <th className="text-left px-4 py-2 font-medium">Status</th>
+                <th scope="col" className="text-left px-4 py-2 font-medium">Case</th>
+                <th scope="col" className="text-left px-4 py-2 font-medium">Place</th>
+                <th scope="col" className="text-left px-4 py-2 font-medium">Court</th>
+                <th scope="col" className="text-left px-4 py-2 font-medium">Sections</th>
+                <th scope="col" className="text-left px-4 py-2 font-medium">Decision</th>
+                <th scope="col" className="text-left px-4 py-2 font-medium">Status</th>
               </tr>
             </thead>
             <tbody>
@@ -450,12 +450,12 @@ function FetchProgressPanel({
           <table className="w-full text-xs">
             <thead className="bg-surface text-skin-muted">
               <tr>
-                <th className="px-3 py-2 text-left font-medium">Source</th>
-                <th className="px-3 py-2 text-left font-medium">Status</th>
-                <th className="px-3 py-2 text-left font-medium">Attempts</th>
-                <th className="px-3 py-2 text-left font-medium">Next try</th>
-                <th className="px-3 py-2 text-left font-medium">Updated</th>
-                <th className="px-3 py-2 text-left font-medium">Result</th>
+                <th scope="col" className="px-3 py-2 text-left font-medium">Source</th>
+                <th scope="col" className="px-3 py-2 text-left font-medium">Status</th>
+                <th scope="col" className="px-3 py-2 text-left font-medium">Attempts</th>
+                <th scope="col" className="px-3 py-2 text-left font-medium">Next try</th>
+                <th scope="col" className="px-3 py-2 text-left font-medium">Updated</th>
+                <th scope="col" className="px-3 py-2 text-left font-medium">Result</th>
               </tr>
             </thead>
             <tbody>
@@ -580,11 +580,11 @@ function FetchJudgmentControls({
 
 function StatusPill({ text, tone }: { text: string; tone: "success" | "pending" | "blocked" | "neutral" }) {
   const className = tone === "success"
-    ? "border-green-200 bg-green-50 text-green-700"
+    ? "border-[rgb(var(--color-success-border))] bg-[rgb(var(--color-success-soft))] text-[rgb(var(--color-success))]"
     : tone === "pending"
-      ? "border-amber-200 bg-amber-50 text-amber-700"
+      ? "border-[rgb(var(--color-warning-border))] bg-[rgb(var(--color-warning-soft))] text-[rgb(var(--color-warning))]"
       : tone === "blocked"
-        ? "border-red-200 bg-red-50 text-red-700"
+        ? "border-[rgb(var(--color-danger-border))] bg-[rgb(var(--color-danger-soft))] text-[rgb(var(--color-danger))]"
         : "border-skin bg-surface-alt text-skin-muted";
   return <span className={`rounded-full border px-2 py-1 ${className}`}>{text}</span>;
 }
