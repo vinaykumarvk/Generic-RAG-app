@@ -1098,15 +1098,6 @@ def _convert_extractions_to_edges(
     for ext in extractions:
         text = ext.extraction_text.strip()
         description = ext.description or ""
-        if valid_edge_types and edge_type not in valid_edge_types:
-            if closed_schema:
-                logger.warning(
-                    "Rejected out-of-ontology edge type '%s' for chunk %s",
-                    edge_type,
-                    chunk_id,
-                )
-                continue
-            edge_type = "related_to" if "related_to" in valid_edge_types else edge_type
 
         edge_type = _normalize_edge_type(
             ext.extraction_class or "related_to", valid_edge_types, closed_schema, chunk_id,
