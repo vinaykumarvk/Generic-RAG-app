@@ -8,7 +8,7 @@ const SUPPORTED_EXTENSIONS = [
   ".pdf", ".docx", ".xlsx", ".txt", ".md", ".csv", ".doc", ".xls",
   ".jpg", ".jpeg", ".png", ".tiff", ".bmp", ".gif", ".webp",
 ];
-const MAX_FILES = 100;
+const MAX_FILES = 500;
 const MAX_FILE_SIZE_BYTES = 250 * 1024 * 1024; // 250MB
 const HIDDEN_FILES = [".DS_Store", "Thumbs.db", "desktop.ini"];
 const MAX_CONCURRENT = 4;
