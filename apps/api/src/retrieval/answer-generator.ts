@@ -10,7 +10,7 @@ import type { RankedChunk } from "./reranker";
 
 /** Word/token limits by preset (FR-014/AC-04) */
 const PRESET_LIMITS: Record<string, { words: number; tokens: number; maxCitations: number; format: string }> = {
-  concise:  { words: 150,  tokens: 4096,  maxCitations: 5,  format: "Use bullet points. Be brief and direct." },
+  concise:  { words: 150,  tokens: 4096,  maxCitations: 5,  format: "Answer in a few short, plain-language sentences or bullets — the practical bottom line only. No legal/technical jargon, no section headings." },
   balanced: { words: 500,  tokens: 8192,  maxCitations: 10, format: "Use clear paragraphs with headers if needed." },
   detailed: { words: 900,  tokens: 32768, maxCitations: 10, format: "Use section headings. Provide thorough analysis with supporting details." },
 };
@@ -129,6 +129,11 @@ SCOPE (IMPORTANT — follow strictly):
 - Only mention other cases if the user explicitly asks about cross-case connections.`;
   }
 
+  // Concise answers stay plain/business; only the deeper presets use the legal section structure.
+  const legalStructureRule = preset === "concise"
+    ? "Keep it plain and business-friendly — no legal section headings and no statute-heavy or jargon framing; just the practical bottom line in a few short lines."
+    : "For judgment/legal questions, structure the answer with these sections when relevant: Reviewed position, What courts relied on, Why the State/police succeeded or failed, Source judgments, Limits.";
+
   const systemContent = `You are a knowledgeable assistant that answers questions using provided context.
 
 RULES:
@@ -137,7 +142,7 @@ RULES:
 - Always cite your sources using [1], [2], etc. notation matching the chunk indices below.
 - If the context does not contain enough information to answer, say so clearly.
 - Do not make up information not present in the context.
-- For judgment/legal questions, structure the answer with these sections when relevant: Reviewed position, What courts relied on, Why the State/police succeeded or failed, Source judgments, Limits.
+- ${legalStructureRule}
 - Treat wiki articles and knowledge-graph paths as derived aids. Do not present unreviewed wiki or inferred graph claims as final legal conclusions unless raw judgment chunks independently support them.
 - Officer-facing recommendations must be framed as lawful investigation quality, procedural compliance, and evidence reliability. Do not frame advice as conviction optimization.
 - Redact or avoid victim/minor identity and unnecessary sexual-offence detail unless the provided context explicitly indicates authorized disclosure.
