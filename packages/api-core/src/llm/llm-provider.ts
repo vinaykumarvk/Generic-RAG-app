@@ -801,8 +801,14 @@ export function createLlmProvider(deps: LlmProviderDeps): LlmProvider {
         costUsd = (parsed.promptTokens * inputCostPerM + parsed.outputTokens * outputCostPerM) / 1_000_000;
       }
 
+      // When a per-preset model override is applied, the base provider's display_name
+      // (e.g. "Qwen 3.5 35B (OpenRouter)") misrepresents the model actually used — report
+      // the gateway + overridden model_id so the UI reflects e.g. GPT-5.5 for detailed.
+      const providerDisplay = request.modelOverride && request.modelOverride !== baseConfig.model_id
+        ? (isOpenRouterConfig(config) ? "OpenRouter" : config.provider)
+        : (config.display_name || config.provider);
       const response: LlmCompletionResponse = {
-        content: parsed.content, provider: config.display_name || config.provider, model: config.model_id,
+        content: parsed.content, provider: providerDisplay, model: config.model_id,
         promptTokens: parsed.promptTokens, outputTokens: parsed.outputTokens, costUsd,
         latencyMs: Date.now() - start, fallbackUsed: false,
       };
