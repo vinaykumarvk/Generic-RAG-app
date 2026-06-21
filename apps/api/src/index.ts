@@ -31,6 +31,8 @@ import { createReviewQueueRoutes } from "./routes/review-queue-routes";
 import { createNotificationRoutes } from "./routes/notification-routes";
 import { createAuditRoutes } from "./routes/audit-routes";
 import { createIngestionRoutes } from "./routes/ingestion-routes";
+import { createDistrictSourceRoutes } from "./routes/district-source-routes";
+import { createDistrictAnalyticsRoutes } from "./routes/district-analytics-routes";
 import { createWorkspaceMemberGuard } from "./middleware/workspace-guard";
 import { createStorageProvider } from "./storage";
 
@@ -85,7 +87,7 @@ function validateEnv(): void {
 async function bootstrapAdmin(queryFn: (text: string, params?: unknown[]) => Promise<{ rows: unknown[] }>): Promise<void> {
   try {
     const email = process.env.ADMIN_EMAIL || "admin@intellirag.local";
-    const password = process.env.ADMIN_PASSWORD || "Admin123!";
+    const password = process.env.ADMIN_PASSWORD || "password123";
     const hash = await hashPassword(password);
 
     const adminCheck = await queryFn(
@@ -316,10 +318,18 @@ async function main() {
   const getClient = async () => pool.connect();
 
   // Bootstrap admin if no admin exists (FR-001)
-  await bootstrapAdmin(queryFn);
+  if (isTruthy(process.env.SKIP_BOOTSTRAP_ADMIN)) {
+    logWarn("Bootstrap admin skipped by SKIP_BOOTSTRAP_ADMIN");
+  } else {
+    await bootstrapAdmin(queryFn);
+  }
 
   // Bootstrap LLM providers (Qwen/OpenRouter default, Gemini → KG_EXTRACTION)
-  await bootstrapProviders(queryFn);
+  if (isTruthy(process.env.SKIP_BOOTSTRAP_PROVIDERS)) {
+    logWarn("Bootstrap providers skipped by SKIP_BOOTSTRAP_PROVIDERS");
+  } else {
+    await bootstrapProviders(queryFn);
+  }
 
   const llmProvider = createLlmProvider({ queryFn });
 
@@ -384,6 +394,8 @@ async function main() {
       createNotificationRoutes(app, deps);
       createAuditRoutes(app, deps);
       createIngestionRoutes(app, deps);
+      createDistrictSourceRoutes(app, deps);
+      createDistrictAnalyticsRoutes(app, deps);
     },
   });
 

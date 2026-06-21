@@ -17,8 +17,8 @@ export function createIngestionRoutes(app: FastifyInstance, deps: { queryFn: Que
       const { wid, docId } = request.params;
 
       const result = await queryFn(
-        `SELECT job_id, step, status, attempt, error_message, progress,
-                started_at, completed_at, created_at,
+        `SELECT job_id, step, status, attempt, max_attempts, error_message, failure_category, progress,
+                started_at, completed_at, locked_until, reclaimed_at, dead_lettered_at, created_at,
                 EXTRACT(EPOCH FROM (completed_at - started_at)) * 1000 as duration_ms
          FROM ingestion_job
          WHERE document_id = $1 AND workspace_id = $2
@@ -43,7 +43,8 @@ export function createIngestionRoutes(app: FastifyInstance, deps: { queryFn: Que
         `SELECT step,
                 count(*) as total,
                 count(*) FILTER (WHERE status = 'COMPLETED') as completed,
-                count(*) FILTER (WHERE status = 'FAILED') as failed,
+                count(*) FILTER (WHERE status IN ('FAILED','DEAD_LETTER')) as failed,
+                count(*) FILTER (WHERE status = 'DEAD_LETTER') as dead_lettered,
                 avg(EXTRACT(EPOCH FROM (completed_at - started_at)) * 1000) FILTER (WHERE status = 'COMPLETED') as avg_duration_ms,
                 percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (completed_at - started_at)) * 1000) FILTER (WHERE status = 'COMPLETED') as p95_duration_ms
          FROM ingestion_job
@@ -111,7 +112,13 @@ export function createIngestionRoutes(app: FastifyInstance, deps: { queryFn: Que
 
         // Cancel pending jobs
         await client.query(
-          "UPDATE ingestion_job SET status = 'FAILED' WHERE document_id = ANY($1) AND status IN ('PENDING', 'RETRYING')",
+          `UPDATE ingestion_job
+           SET status = 'FAILED',
+               failure_category = 'manual_reprocess',
+               locked_until = NULL,
+               updated_at = now()
+           WHERE document_id = ANY($1)
+             AND status IN ('PENDING', 'RETRYING', 'PROCESSING', 'DEAD_LETTER')`,
           [docIds]
         );
 

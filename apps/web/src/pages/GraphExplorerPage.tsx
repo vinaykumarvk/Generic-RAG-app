@@ -20,6 +20,12 @@ export function GraphExplorerPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [hops, setHops] = useState(1);
   const deferredSearchTerm = useDeferredValue(searchTerm.trim());
+  const legalTypeShortcuts = [
+    { label: "Issues", type: "legal_issue" },
+    { label: "Lapses", type: "investigation_lapse" },
+    { label: "Outcomes", type: "outcome" },
+    { label: "Precedents", type: "precedent" },
+  ];
 
   const { data: stats, isLoading } = useQuery({
     queryKey: ["graph-stats", workspaceId],
@@ -51,7 +57,7 @@ export function GraphExplorerPage() {
               type="search"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search person, police station, crime ID..."
+              placeholder="Search issue, lapse, judgment..."
               className="pl-8 pr-3 py-1.5 text-xs border border-skin rounded-lg bg-surface text-skin-base focus:ring-1 focus:ring-primary-500 outline-none w-48"
             />
           </div>
@@ -72,6 +78,23 @@ export function GraphExplorerPage() {
             onTypeChange={setTypeFilter}
           />
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {legalTypeShortcuts.map((shortcut) => (
+          <button
+            key={shortcut.type}
+            type="button"
+            onClick={() => setTypeFilter(typeFilter === shortcut.type ? null : shortcut.type)}
+            className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+              typeFilter === shortcut.type
+                ? "border-primary-500 bg-primary-50 text-primary-700"
+                : "border-skin bg-surface text-skin-muted hover:bg-surface-alt"
+            }`}
+          >
+            {shortcut.label}
+          </button>
+        ))}
       </div>
 
       <div className="flex gap-4 h-[calc(100dvh-14rem)]">

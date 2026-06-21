@@ -3,6 +3,10 @@ interface ExportCitation {
   document_title: string;
   page_number: number | null;
   excerpt: string;
+  source_language?: string | null;
+  target_language?: string | null;
+  translation_status?: string | null;
+  original_excerpt?: string | null;
 }
 
 /**
@@ -29,6 +33,9 @@ export function downloadAnswerAsPdf(
         ${citations.map((c) => `
           <li>
             <strong>${escapeHtml(c.document_title)}</strong>${c.page_number ? `, p.${c.page_number}` : ""}
+            ${c.source_language && c.target_language && c.source_language !== c.target_language
+              ? `<br /><span class="excerpt">${escapeHtml(c.source_language.toUpperCase())} to ${escapeHtml(c.target_language.toUpperCase())}${c.translation_status ? ` (${escapeHtml(c.translation_status)})` : ""}</span>`
+              : ""}
             <br /><span class="excerpt">${escapeHtml(c.excerpt)}</span>
           </li>
         `).join("")}
@@ -158,6 +165,9 @@ interface ConversationMessage {
     document_title: string;
     page_number: number | null;
     excerpt: string;
+    source_language?: string | null;
+    target_language?: string | null;
+    translation_status?: string | null;
   }>;
 }
 
@@ -187,7 +197,10 @@ export function downloadConversationAsPdf(
           .sort((a, b) => a.citation_index - b.citation_index)
           .map((c) => {
             const page = c.page_number ? `, p.${c.page_number}` : "";
-            return `<li><strong>${escapeHtml(c.document_title)}</strong>${page}</li>`;
+            const translation = c.source_language && c.target_language && c.source_language !== c.target_language
+              ? ` (${escapeHtml(c.source_language.toUpperCase())} to ${escapeHtml(c.target_language.toUpperCase())}${c.translation_status ? `, ${escapeHtml(c.translation_status)}` : ""})`
+              : "";
+            return `<li><strong>${escapeHtml(c.document_title)}</strong>${page}${translation}</li>`;
           });
         citationsHtml = `<div class="refs"><strong>References:</strong><ol>${refs.join("")}</ol></div>`;
       }

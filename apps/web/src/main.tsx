@@ -7,6 +7,36 @@ import { applyStoredTheme } from "@/hooks/useTheme";
 import { App } from "@/App";
 import "./index.css";
 
+const STALE_CHUNK_RELOAD_KEY = "intellirag_stale_chunk_reload";
+
+function isStaleChunkError(reason: unknown): boolean {
+  const message = reason instanceof Error ? reason.message : String(reason ?? "");
+  return (
+    message.includes("Failed to fetch dynamically imported module") ||
+    message.includes("Importing a module script failed") ||
+    message.includes("Unable to preload CSS")
+  );
+}
+
+function reloadOnceForFreshAssets(): void {
+  const reloadKey = `${STALE_CHUNK_RELOAD_KEY}:${window.location.pathname}`;
+  if (sessionStorage.getItem(reloadKey)) return;
+  sessionStorage.setItem(reloadKey, "true");
+  window.location.reload();
+}
+
+window.addEventListener("vite:preloadError", (event) => {
+  event.preventDefault();
+  reloadOnceForFreshAssets();
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  if (isStaleChunkError(event.reason)) {
+    event.preventDefault();
+    reloadOnceForFreshAssets();
+  }
+});
+
 // Apply theme before React renders to prevent flash of wrong theme
 applyStoredTheme();
 

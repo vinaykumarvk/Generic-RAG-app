@@ -28,6 +28,11 @@ vi.mock("../../retrieval/graph-context", () => ({
   graphContextLookup: vi.fn(),
 }));
 
+vi.mock("../../retrieval/wiki-selector", () => ({
+  selectWikiArticles: vi.fn(),
+  logWikiCoverageGap: vi.fn(),
+}));
+
 vi.mock("../../retrieval/reranker", () => ({
   rerank: vi.fn(),
 }));
@@ -61,8 +66,10 @@ import { detectEntities } from "../../retrieval/entity-detector";
 import { vectorSearch } from "../../retrieval/vector-search";
 import { lexicalSearch } from "../../retrieval/lexical-search";
 import { graphContextLookup } from "../../retrieval/graph-context";
+import { logWikiCoverageGap, selectWikiArticles } from "../../retrieval/wiki-selector";
 import { rerank } from "../../retrieval/reranker";
 import { generateAnswer } from "../../retrieval/answer-generator";
+import { buildAccessSignature, filterChunksByAccess } from "../../middleware/sensitivity-guard";
 
 // ── Mock Helpers ──────────────────────────────────────────────────────────────
 
@@ -112,7 +119,7 @@ describe("executeRetrievalPipeline", () => {
   let llmProvider: ReturnType<typeof createMockLlmProvider>;
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     queryFn = createMockQueryFn();
     llmProvider = createMockLlmProvider();
 
@@ -124,6 +131,10 @@ describe("executeRetrievalPipeline", () => {
     queryFn.mockResolvedValueOnce({ rows: [], rowCount: 1 });
     // Early history fetch (getConversationHistory)
     queryFn.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+    vi.mocked(selectWikiArticles).mockResolvedValue({ results: [], latencyMs: 0 });
+    vi.mocked(logWikiCoverageGap).mockResolvedValue(undefined);
+    vi.mocked(filterChunksByAccess).mockImplementation((_qf: unknown, chunkIds: string[]) => Promise.resolve(chunkIds));
+    vi.mocked(buildAccessSignature).mockReturnValue("INTERNAL:MEMBER");
   });
 
   function setupFullPipelineMocks() {
@@ -143,6 +154,12 @@ describe("executeRetrievalPipeline", () => {
     vi.mocked(detectEntities).mockResolvedValueOnce([
       { name: "data privacy", type: "concept" },
     ]);
+
+    vi.mocked(selectWikiArticles).mockResolvedValueOnce({
+      results: [],
+      latencyMs: 5,
+    });
+    vi.mocked(logWikiCoverageGap).mockResolvedValueOnce(undefined);
 
     // Step 4: Vector search (one per expanded query)
     vi.mocked(vectorSearch).mockResolvedValueOnce({
@@ -168,7 +185,7 @@ describe("executeRetrievalPipeline", () => {
 
     // Step 6: Graph context
     vi.mocked(graphContextLookup).mockResolvedValueOnce({
-      result: { nodes: [], edges: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
+      result: { nodes: [], edges: [], paths: [], assertions: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
       latencyMs: 20,
     });
 
@@ -240,9 +257,183 @@ describe("executeRetrievalPipeline", () => {
       expect(generateAnswer).toHaveBeenCalledTimes(1);
       expect(writeCache).toHaveBeenCalledTimes(1);
     });
+
+    it("adds wiki selection and graph paths into fusion options", async () => {
+      setupFullPipelineMocks();
+      vi.mocked(selectWikiArticles).mockReset();
+      vi.mocked(selectWikiArticles).mockResolvedValueOnce({
+        results: [
+          {
+            article_id: "article-1",
+            slug: "ndps-section-50",
+            title: "NDPS Section 50",
+            summary: "Reviewed Section 50 synthesis",
+            body: "Body",
+            frontmatter: {},
+            court_scope: ["SCI"],
+            statutes: ["NDPS"],
+            sections: ["50"],
+            issue_tags: ["section_50_ndps"],
+            outcome_focus: ["conviction_set_aside"],
+            policing_stage: "search",
+            source_judgments: ["sci:2024:ndps"],
+            source_chunk_ids: ["c1"],
+            corpus_scope: {},
+            legal_validity_window: {},
+            confidence: 0.9,
+            review_status: "approved",
+            material_claim_count: 1,
+            cited_material_claim_count: 1,
+            citation_coverage: 1,
+            score: 0.8,
+          },
+        ],
+        latencyMs: 5,
+      });
+      vi.mocked(graphContextLookup).mockReset();
+      vi.mocked(graphContextLookup).mockResolvedValueOnce({
+        result: {
+          nodes: [],
+          edges: [],
+          paths: [{
+            source: "n1",
+            target: "n2",
+            edge_type: "outcome_caused_by",
+            source_name: "Acquittal",
+            target_name: "Section 50 lapse",
+            confidence: 0.9,
+            review_status: "needs_review",
+            evidence_chunk_id: "c1",
+            source_span: { quote: "non-compliance" },
+          }],
+          assertions: [],
+          contextText: "Relationship: Acquittal --[outcome_caused_by]--> Section 50 lapse",
+          chunkIds: new Set(["c1"]),
+          nodeIds: ["n1", "n2"],
+        },
+        latencyMs: 20,
+      });
+      vi.mocked(vectorSearch).mockResolvedValue({
+        results: [],
+        latencyMs: 10,
+      });
+      queryFn.mockReset();
+      queryFn.mockImplementation(async (sql: string): Promise<{ rows: any[]; rowCount: number | null }> => {
+        if (typeof sql === "string" && sql.includes("INSERT INTO conversation")) {
+          return { rows: [{ conversation_id: "conv-1" }], rowCount: 1 };
+        }
+        if (typeof sql === "string" && sql.includes("INSERT INTO message")) {
+          return { rows: [{ message_id: "msg-asst-1" }], rowCount: 1 };
+        }
+        if (typeof sql === "string" && sql.includes("FROM chunk c")) {
+          return {
+            rows: [{
+              chunk_id: "c1",
+              document_id: "doc-1",
+              content: "Section 50 non-compliance led to acquittal.",
+              similarity: 0.75,
+              chunk_type: "paragraph",
+              page_start: 5,
+              heading_path: "Section 50",
+              document_title: "NDPS Judgment",
+            }],
+            rowCount: 1,
+          };
+        }
+        if (typeof sql === "string" && sql.includes("INSERT INTO retrieval_run")) {
+          return { rows: [{ retrieval_run_id: "retrieval-run-1" }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 1 };
+      });
+
+      await executeRetrievalPipeline(
+        { queryFn, llmProvider },
+        makeRequest({ question: "What is the doctrine on NDPS Section 50?" })
+      );
+
+      const rerankCall = vi.mocked(rerank).mock.calls[0];
+      const fusionOptions = rerankCall[5] as { queryProfile: string; wikiChunkIds: Set<string>; graphPathChunkIds: Set<string> };
+      expect(fusionOptions.queryProfile).toBe("doctrine");
+      expect(fusionOptions.wikiChunkIds.has("c1")).toBe(true);
+      expect(fusionOptions.graphPathChunkIds.has("c1")).toBe(true);
+      expect(selectWikiArticles).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("TC-INT-03: Cache hit short-circuits pipeline", () => {
+    it("routes district aggregate questions through analytics without RAG retrieval", async () => {
+      queryFn.mockReset();
+      queryFn.mockImplementation(async (sql: string): Promise<{ rows: any[]; rowCount: number | null }> => {
+        if (typeof sql === "string" && sql.includes("INSERT INTO conversation")) {
+          return { rows: [{ conversation_id: "conv-analytics" }], rowCount: 1 };
+        }
+        if (typeof sql === "string" && sql.includes("INSERT INTO message")) {
+          return { rows: [{ message_id: "msg-analytics" }], rowCount: 1 };
+        }
+        if (typeof sql === "string" && sql.includes("INSERT INTO retrieval_run")) {
+          return { rows: [{ retrieval_run_id: "retrieval-run-analytics" }], rowCount: 1 };
+        }
+        if (typeof sql === "string" && sql.includes("FROM district_case_fact_daily") && !sql.includes("GROUP BY")) {
+          return {
+            rows: [{
+              total_cases: 100,
+              criminal_targets: 80,
+              text_available: 25,
+              ocr_required: 5,
+              translated: 12,
+              redacted: 10,
+              rag_active: 9,
+              fetch_failed: 3,
+              avg_delay_days: 240,
+              p95_delay_days: 900,
+            }],
+            rowCount: 1,
+          };
+        }
+        if (typeof sql === "string" && sql.includes("FROM district_case_fact_daily") && sql.includes("GROUP BY")) {
+          return {
+            rows: [{
+              state_code: 9,
+              district_code: 101,
+              court_level: "district",
+              language: "hi",
+              source_name: "ddl",
+              total_cases: 100,
+              criminal_targets: 80,
+              text_available: 25,
+              translated: 12,
+              redacted: 10,
+              rag_active: 9,
+            }],
+            rowCount: 1,
+          };
+        }
+        return { rows: [], rowCount: 1 };
+      });
+      vi.mocked(checkCache).mockResolvedValueOnce(null);
+      vi.mocked(expandQueryWithIntent).mockResolvedValueOnce({
+        queries: ["How many district court POCSO cases have text coverage?"],
+        expandedIntent: "Count district court metadata coverage",
+      });
+      vi.mocked(detectEntities).mockResolvedValueOnce([]);
+
+      const result = await executeRetrievalPipeline(
+        { queryFn, llmProvider },
+        makeRequest({
+          question: "How many district court POCSO cases have text coverage?",
+          filters: { state_code: 9 },
+        })
+      );
+
+      expect(result.retrieval.mode).toBe("district_analytics");
+      expect(result.retrieval.query_profile).toBe("district_analytics");
+      expect(result.answer).toContain("100 district-court metadata cases");
+      expect(vectorSearch).not.toHaveBeenCalled();
+      expect(lexicalSearch).not.toHaveBeenCalled();
+      expect(graphContextLookup).not.toHaveBeenCalled();
+      expect(generateAnswer).not.toHaveBeenCalled();
+    });
+
     it("returns cached answer without running retrieval steps", async () => {
       vi.mocked(checkCache).mockResolvedValueOnce({
         answer_text: "Cached answer about privacy",
@@ -471,7 +662,7 @@ describe("executeRetrievalPipeline", () => {
       vi.mocked(vectorSearch).mockResolvedValueOnce({ results: [], latencyMs: 10 });
       vi.mocked(lexicalSearch).mockResolvedValueOnce({ results: [], latencyMs: 10 });
       vi.mocked(graphContextLookup).mockResolvedValueOnce({
-        result: { nodes: [], edges: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
+        result: { nodes: [], edges: [], paths: [], assertions: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
         latencyMs: 5,
       });
       vi.mocked(rerank).mockReturnValueOnce([]);
@@ -539,7 +730,7 @@ describe("executeRetrievalPipeline", () => {
       vi.mocked(vectorSearch).mockResolvedValueOnce({ results: [], latencyMs: 10 });
       vi.mocked(lexicalSearch).mockResolvedValueOnce({ results: [], latencyMs: 10 });
       vi.mocked(graphContextLookup).mockResolvedValueOnce({
-        result: { nodes: [], edges: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
+        result: { nodes: [], edges: [], paths: [], assertions: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
         latencyMs: 5,
       });
       vi.mocked(rerank).mockReturnValueOnce([]);
@@ -592,7 +783,7 @@ describe("executeRetrievalPipeline", () => {
       vi.mocked(vectorSearch).mockResolvedValueOnce({ results: [], latencyMs: 10 });
       vi.mocked(lexicalSearch).mockResolvedValueOnce({ results: [], latencyMs: 10 });
       vi.mocked(graphContextLookup).mockResolvedValueOnce({
-        result: { nodes: [], edges: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
+        result: { nodes: [], edges: [], paths: [], assertions: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
         latencyMs: 5,
       });
       vi.mocked(rerank).mockReturnValueOnce([]);
@@ -626,7 +817,7 @@ describe("executeRetrievalPipeline", () => {
       vi.mocked(vectorSearch).mockResolvedValueOnce({ results: [], latencyMs: 10 });
       vi.mocked(lexicalSearch).mockResolvedValueOnce({ results: [], latencyMs: 10 });
       vi.mocked(graphContextLookup).mockResolvedValueOnce({
-        result: { nodes: [], edges: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
+        result: { nodes: [], edges: [], paths: [], assertions: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
         latencyMs: 5,
       });
       vi.mocked(rerank).mockReturnValueOnce([]);
@@ -668,7 +859,7 @@ describe("executeRetrievalPipeline", () => {
       vi.mocked(vectorSearch).mockResolvedValueOnce({ results: [], latencyMs: 10 });
       vi.mocked(lexicalSearch).mockResolvedValueOnce({ results: [], latencyMs: 10 });
       vi.mocked(graphContextLookup).mockResolvedValueOnce({
-        result: { nodes: [], edges: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
+        result: { nodes: [], edges: [], paths: [], assertions: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
         latencyMs: 5,
       });
       vi.mocked(rerank).mockReturnValueOnce([]);
@@ -708,7 +899,7 @@ describe("executeRetrievalPipeline", () => {
       vi.mocked(vectorSearch).mockResolvedValueOnce({ results: [], latencyMs: 10 });
       vi.mocked(lexicalSearch).mockResolvedValueOnce({ results: [], latencyMs: 10 });
       vi.mocked(graphContextLookup).mockResolvedValueOnce({
-        result: { nodes: [], edges: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
+        result: { nodes: [], edges: [], paths: [], assertions: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
         latencyMs: 5,
       });
       vi.mocked(rerank).mockReturnValueOnce([
@@ -812,7 +1003,7 @@ describe("executeRetrievalPipeline", () => {
       });
       vi.mocked(lexicalSearch).mockResolvedValueOnce({ results: [], latencyMs: 10 });
       vi.mocked(graphContextLookup).mockResolvedValueOnce({
-        result: { nodes: [], edges: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
+        result: { nodes: [], edges: [], paths: [], assertions: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
         latencyMs: 5,
       });
       vi.mocked(rerank).mockReturnValueOnce([
@@ -954,7 +1145,7 @@ describe("executeRetrievalPipeline", () => {
       vi.mocked(vectorSearch).mockResolvedValue({ results: [], latencyMs: 10 });
       vi.mocked(lexicalSearch).mockResolvedValueOnce({ results: [], latencyMs: 10 });
       vi.mocked(graphContextLookup).mockResolvedValueOnce({
-        result: { nodes: [], edges: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
+        result: { nodes: [], edges: [], paths: [], assertions: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
         latencyMs: 5,
       });
       vi.mocked(rerank).mockReturnValueOnce([]);
@@ -1010,7 +1201,7 @@ describe("executeRetrievalPipeline", () => {
       vi.mocked(vectorSearch).mockResolvedValue({ results: [], latencyMs: 10 });
       vi.mocked(lexicalSearch).mockResolvedValueOnce({ results: [], latencyMs: 10 });
       vi.mocked(graphContextLookup).mockResolvedValueOnce({
-        result: { nodes: [], edges: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
+        result: { nodes: [], edges: [], paths: [], assertions: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
         latencyMs: 5,
       });
       vi.mocked(rerank).mockReturnValueOnce([
@@ -1148,7 +1339,7 @@ describe("executeRetrievalPipeline", () => {
       vi.mocked(vectorSearch).mockResolvedValueOnce({ results: [], latencyMs: 10 });
       vi.mocked(lexicalSearch).mockResolvedValueOnce({ results: [], latencyMs: 10 });
       vi.mocked(graphContextLookup).mockResolvedValueOnce({
-        result: { nodes: [], edges: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
+        result: { nodes: [], edges: [], paths: [], assertions: [], contextText: "", chunkIds: new Set(), nodeIds: [] },
         latencyMs: 5,
       });
       vi.mocked(rerank).mockReturnValueOnce([]);

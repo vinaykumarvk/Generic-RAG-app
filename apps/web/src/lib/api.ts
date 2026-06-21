@@ -56,8 +56,8 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
   }
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ message: res.statusText }));
-    throw new Error(body.message || `API error ${res.status}`);
+    const body = await res.json().catch(() => ({ message: res.statusText })) as { message?: string; error?: string };
+    throw new Error(body.message || body.error || `API error ${res.status}`);
   }
 
   return res.json();

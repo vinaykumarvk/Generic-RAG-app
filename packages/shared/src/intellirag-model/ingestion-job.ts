@@ -10,14 +10,28 @@ export const JobStatusSchema = z.enum([
   "COMPLETED",
   "FAILED",
   "RETRYING",
+  "DEAD_LETTER",
 ]);
 export type JobStatus = z.infer<typeof JobStatusSchema>;
 
+export const JobFailureCategorySchema = z.enum([
+  "worker_exception",
+  "max_attempts_exceeded",
+  "stale_processing_lock",
+  "unknown_step",
+  "manual_reprocess",
+  "superseded",
+]);
+export type JobFailureCategory = z.infer<typeof JobFailureCategorySchema>;
+
 export const JobStepSchema = z.enum([
   "VALIDATE",
+  "SPLIT",
   "NORMALIZE",
   "CONVERT",
   "METADATA_EXTRACT",
+  "REDACT",
+  "TRANSLATE",
   "CHUNK",
   "EMBED",
   "KG_EXTRACT",
@@ -33,12 +47,15 @@ export const IngestionJobSchema = z.object({
   priority: z.number().int().default(0),
   attempt: z.number().int().default(0),
   max_attempts: z.number().int().default(3),
-  error_message: z.string().optional(),
+  error_message: z.string().nullable().optional(),
+  failure_category: JobFailureCategorySchema.nullable().optional(),
   progress: z.number().min(0).max(100).default(0),
   metadata: z.record(z.string(), z.unknown()).default({}),
-  started_at: z.string().datetime().optional(),
-  completed_at: z.string().datetime().optional(),
-  locked_until: z.string().datetime().optional(),
+  started_at: z.string().datetime().nullable().optional(),
+  completed_at: z.string().datetime().nullable().optional(),
+  locked_until: z.string().datetime().nullable().optional(),
+  reclaimed_at: z.string().datetime().nullable().optional(),
+  dead_lettered_at: z.string().datetime().nullable().optional(),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
 });

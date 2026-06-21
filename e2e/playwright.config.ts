@@ -9,6 +9,8 @@
  */
 import { defineConfig, devices } from "@playwright/test";
 
+const intelliragBaseURL = process.env.INTELLIRAG_BASE_URL || "http://localhost:5173";
+
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
@@ -39,7 +41,7 @@ export default defineConfig({
     {
       name: "intellirag-chromium",
       testMatch: /intellirag-.*/,
-      use: { ...devices["Desktop Chrome"], baseURL: "http://localhost:5173" },
+      use: { ...devices["Desktop Chrome"], baseURL: intelliragBaseURL },
     },
   ],
 });

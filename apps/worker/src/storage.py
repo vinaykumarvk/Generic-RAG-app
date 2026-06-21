@@ -96,6 +96,7 @@ class StorageClient:
         doc_id: str,
         filename: str,
         content: bytes,
+        content_type: str = "application/pdf",
     ) -> str:
         """Upload a split PDF part and return the storage path.
 
@@ -111,7 +112,7 @@ class StorageClient:
             if not self._gcs_bucket:
                 raise RuntimeError("GCS bucket not initialized")
             blob = self._gcs_bucket.blob(gcs_path)
-            blob.upload_from_string(content, content_type="application/pdf")
+            blob.upload_from_string(content, content_type=content_type)
             logger.info(f"Uploaded split part to gs://{self._gcs_bucket.name}/{gcs_path}")
             return gcs_path
 

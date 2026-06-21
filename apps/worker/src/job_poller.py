@@ -14,8 +14,15 @@ from .pipeline.kg_extractor import extract_kg
 from .pipeline.converter import convert_document
 from .pipeline.metadata_extractor import extract_metadata
 from .pipeline.pdf_splitter import split_document
+from .pipeline.redactor import redact_document
+from .pipeline.translator import translate_document
 
 logger = logging.getLogger(__name__)
+
+
+class NonRetryableJobError(Exception):
+    """Raised when retrying cannot make a malformed queue row succeed."""
+
 
 STEP_HANDLERS = {
     "VALIDATE": validate_document,
@@ -23,10 +30,72 @@ STEP_HANDLERS = {
     "NORMALIZE": normalize_document,
     "CONVERT": convert_document,
     "METADATA_EXTRACT": extract_metadata,
+    "REDACT": redact_document,
+    "TRANSLATE": translate_document,
     "CHUNK": chunk_document,
     "EMBED": embed_chunks,
     "KG_EXTRACT": extract_kg,
 }
+
+
+def _truncate_error(error: Exception | str) -> str:
+    return str(error)[:2000]
+
+
+def _failure_category(error: Exception) -> str:
+    if isinstance(error, NonRetryableJobError):
+        return "unknown_step"
+    return "worker_exception"
+
+
+def _reclaim_stale_processing_jobs(cur) -> None:
+    """Recover worker-crashed PROCESSING rows whose locks have expired."""
+
+    cur.execute(
+        """
+        WITH stale AS (
+            SELECT job_id, attempt, max_attempts
+            FROM ingestion_job
+            WHERE status = 'PROCESSING'
+              AND locked_until IS NOT NULL
+              AND locked_until < now()
+            ORDER BY locked_until ASC, created_at ASC
+            LIMIT %s
+            FOR UPDATE SKIP LOCKED
+        ),
+        updated_jobs AS (
+            UPDATE ingestion_job AS job
+            SET status = CASE
+                  WHEN stale.attempt >= stale.max_attempts THEN 'DEAD_LETTER'
+                  ELSE 'RETRYING'
+                END,
+                locked_until = NULL,
+                failure_category = 'stale_processing_lock',
+                error_message = 'Worker lock expired before completion',
+                reclaimed_at = CASE
+                  WHEN stale.attempt < stale.max_attempts THEN now()
+                  ELSE job.reclaimed_at
+                END,
+                dead_lettered_at = CASE
+                  WHEN stale.attempt >= stale.max_attempts THEN now()
+                  ELSE job.dead_lettered_at
+                END,
+                updated_at = now()
+            FROM stale
+            WHERE job.job_id = stale.job_id
+            RETURNING job.document_id, job.status
+        )
+        UPDATE document AS doc
+        SET status = 'FAILED',
+            error_message = 'Worker lock expired before completion',
+            updated_at = now()
+        FROM updated_jobs
+        WHERE doc.document_id = updated_jobs.document_id
+          AND updated_jobs.status = 'DEAD_LETTER'
+        """,
+        (config.JOB_STALE_REAPER_BATCH_SIZE,),
+    )
+
 
 # State transition map: step -> (next_step, doc_status_while_processing, doc_status_after_completion)
 STEP_TRANSITIONS = {
@@ -34,7 +103,9 @@ STEP_TRANSITIONS = {
     "SPLIT": ("NORMALIZE", "SPLITTING", "NORMALIZING"),
     "NORMALIZE": ("CONVERT", "NORMALIZING", "CONVERTING"),
     "CONVERT": ("METADATA_EXTRACT", "CONVERTING", "METADATA_EXTRACTING"),
-    "METADATA_EXTRACT": ("CHUNK", "METADATA_EXTRACTING", "CHUNKING"),
+    "METADATA_EXTRACT": ("REDACT", "METADATA_EXTRACTING", "REDACTING"),
+    "REDACT": ("TRANSLATE", "REDACTING", "TRANSLATING"),
+    "TRANSLATE": ("CHUNK", "TRANSLATING", "TRANSLATED"),
     "CHUNK": ("EMBED", "CHUNKING", "CHUNKED"),
     "EMBED": (None, "EMBEDDING", "SEARCHABLE"),
     "KG_EXTRACT": (None, "KG_EXTRACTING", "ACTIVE"),
@@ -51,6 +122,8 @@ def poll_once():
     """Poll for one pending job and process it."""
     with get_connection() as conn:
         with get_cursor(conn) as cur:
+            _reclaim_stale_processing_jobs(cur)
+
             cur.execute("""
                 SELECT job_id, document_id, workspace_id, step, attempt, max_attempts, metadata
                 FROM ingestion_job
@@ -84,9 +157,9 @@ def poll_once():
             cur.execute("""
                 UPDATE ingestion_job
                 SET status = 'PROCESSING', attempt = %s, started_at = now(), updated_at = now(),
-                    locked_until = now() + interval '30 minutes'
+                    locked_until = now() + make_interval(mins => %s)
                 WHERE job_id = %s
-            """, (attempt, job_id))
+            """, (attempt, config.JOB_LOCK_TIMEOUT_MINUTES, job_id))
 
             # Update document status
             transition = STEP_TRANSITIONS.get(step)
@@ -100,7 +173,7 @@ def poll_once():
     try:
         handler = STEP_HANDLERS.get(step)
         if not handler:
-            raise ValueError(f"Unknown step: {step}")
+            raise NonRetryableJobError(f"Unknown step: {step}")
 
         handler(doc_id, workspace_id)
 
@@ -109,7 +182,12 @@ def poll_once():
                 # Mark job completed
                 cur.execute("""
                     UPDATE ingestion_job
-                    SET status = 'COMPLETED', progress = 100, completed_at = now(), updated_at = now()
+                    SET status = 'COMPLETED',
+                        progress = 100,
+                        completed_at = now(),
+                        locked_until = NULL,
+                        failure_category = NULL,
+                        updated_at = now()
                     WHERE job_id = %s
                 """, (job_id,))
 
@@ -155,25 +233,38 @@ def poll_once():
 
         with get_connection() as conn:
             with get_cursor(conn) as cur:
-                max_attempts = config.MAX_RETRIES
-                if attempt >= max_attempts:
+                max_attempts = int(job.get("max_attempts") or config.MAX_RETRIES)
+                message = _truncate_error(e)
+                category = _failure_category(e)
+                should_dead_letter = isinstance(e, NonRetryableJobError) or attempt >= max_attempts
+
+                if should_dead_letter:
+                    terminal_category = category if isinstance(e, NonRetryableJobError) else "max_attempts_exceeded"
                     cur.execute("""
                         UPDATE ingestion_job
-                        SET status = 'FAILED', error_message = %s, updated_at = now()
+                        SET status = 'DEAD_LETTER',
+                            error_message = %s,
+                            failure_category = %s,
+                            locked_until = NULL,
+                            dead_lettered_at = now(),
+                            updated_at = now()
                         WHERE job_id = %s
-                    """, (str(e)[:2000], job_id))
+                    """, (message, terminal_category, job_id))
                     cur.execute("""
                         UPDATE document SET status = 'FAILED', error_message = %s, updated_at = now()
                         WHERE document_id = %s
-                    """, (str(e)[:2000], doc_id))
+                    """, (message, doc_id))
                 else:
                     backoff_seconds = 2 ** attempt * 5
                     cur.execute("""
                         UPDATE ingestion_job
-                        SET status = 'RETRYING', error_message = %s, updated_at = now(),
+                        SET status = 'RETRYING',
+                            error_message = %s,
+                            failure_category = %s,
+                            updated_at = now(),
                             locked_until = now() + make_interval(secs => %s)
                         WHERE job_id = %s
-                    """, (str(e)[:2000], backoff_seconds, job_id))
+                    """, (message, category, backoff_seconds, job_id))
                 conn.commit()
 
         return True

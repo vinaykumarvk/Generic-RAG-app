@@ -8,8 +8,20 @@ import { logInfo, logWarn } from "@puda/api-core";
 
 export interface CachedAnswer {
   answer_text: string;
-  citations: Array<{ chunk_id: string; document_title: string; excerpt: string }>;
+  citations: Array<CachedCitation>;
   cache_id: string;
+}
+
+export interface CachedCitation {
+  chunk_id: string;
+  document_title: string;
+  excerpt: string;
+  source_language?: string | null;
+  target_language?: string | null;
+  translation_status?: string | null;
+  translated_excerpt?: string | null;
+  original_excerpt?: string | null;
+  translation_metadata?: Record<string, unknown>;
 }
 
 const CACHE_SIMILARITY_THRESHOLD = 0.80;
@@ -133,7 +145,7 @@ export async function writeCache(
   workspaceId: string,
   query: string,
   answer: string,
-  citations: Array<{ chunk_id: string; document_title: string; excerpt: string }>,
+  citations: CachedCitation[],
   preset: string,
   accessSignature?: string,
   activeFilters: Record<string, unknown> = {},

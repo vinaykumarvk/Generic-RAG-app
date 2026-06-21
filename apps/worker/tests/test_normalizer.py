@@ -54,6 +54,12 @@ class NormalizerTests(unittest.TestCase):
             timeout=60,
         )
 
+    def test_detects_script_and_text_quality_for_district_metadata(self):
+        self.assertEqual(normalizer._detect_script("This is an English order."), "latin")
+        self.assertEqual(normalizer._detect_script("\u092f\u0939 \u0906\u0926\u0947\u0936 \u0939\u0948"), "devanagari")
+        self.assertGreater(normalizer._text_quality_score("Clean judgment text"), 0.9)
+        self.assertLess(normalizer._text_quality_score("\ufffd\ufffdbad"), 0.5)
+
 
 if __name__ == "__main__":
     unittest.main()

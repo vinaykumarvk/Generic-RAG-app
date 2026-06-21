@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>LLM Wiki and Graphify Evaluation for Judgment Exploration</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; color: #17202a; background: #f6f7f9; }
+    main { max-width: 1060px; margin: 0 auto; padding: 40px 28px 64px; }
+    h1 { font-size: 32px; margin: 0 0 8px; }
+    h2 { margin-top: 34px; border-bottom: 1px solid #d7dce2; padding-bottom: 8px; }
+    h3 { margin-top: 24px; }
+    p, li { line-height: 1.55; }
+    .card { background: #fff; border: 1px solid #dde3ea; border-radius: 8px; padding: 22px; margin: 18px 0; }
+    .verdict { border-left: 5px solid #1f7a4d; }
+    .warn { border-left: 5px solid #a15c00; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; margin: 16px 0; }
+    th, td { border: 1px solid #d7dce2; padding: 10px; text-align: left; vertical-align: top; }
+    th { background: #eef2f6; }
+    code { background: #eef2f6; padding: 1px 4px; border-radius: 4px; }
+    .small { color: #5d6975; font-size: 14px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>LLM Wiki and Graphify Evaluation for Judgment Exploration</h1>
+  <p class="small">Generated 2026-05-21. Scope: Karpathy LLM Wiki pattern, local LLM wiki repository, Graphify, and the proposed judgment ingestion workspace.</p>
+
+  <section class="card verdict">
+    <h2>Verdict</h2>
+    <p>Use the LLM wiki pattern, but only as a governed doctrine and policing-lessons layer above the judgment corpus. Do not make it the primary storage, ingestion, or retrieval substrate.</p>
+    <p>Use selected Graphify ideas for graph exploration: confidence-tagged edges, path queries, communities, high-degree nodes, and surprising-connection reports. Do not use Graphify as the legal ingestion engine.</p>
+  </section>
+
+  <section class="grid">
+    <div class="card">
+      <h2>Borrow From LLM Wiki</h2>
+      <ul>
+        <li>Persistent compiled knowledge.</li>
+        <li>Immutable raw sources.</li>
+        <li>Markdown articles for human and LLM use.</li>
+        <li>Frontmatter schema validation.</li>
+        <li>Citation verification.</li>
+        <li>Human review status.</li>
+        <li>Hierarchical indexes.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>Borrow From Graphify</h2>
+      <ul>
+        <li>Confidence labels on edges.</li>
+        <li>Graph traversal queries.</li>
+        <li>Shortest-path explanations.</li>
+        <li>Community detection.</li>
+        <li>High-degree concept reports.</li>
+        <li>Unexpected cross-cluster links.</li>
+      </ul>
+    </div>
+    <div class="card warn">
+      <h2>Avoid</h2>
+      <ul>
+        <li>Plain wiki as legal source of truth.</li>
+        <li>Unreviewed LLM-written legal guidance.</li>
+        <li>Generic graph extraction without legal schema.</li>
+        <li>Flattening court-specific doctrine.</li>
+        <li>Optimizing for convictions instead of lawful evidence quality.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Recommended Architecture</h2>
+    <h3>1. Judgment Corpus Layer</h3>
+    <p>Authoritative raw judgments, normalized metadata, source manifests, chunks, embeddings, lexical indexes, and ingestion jobs in the separate judgment database.</p>
+    <h3>2. Legal Knowledge Graph Layer</h3>
+    <p>Derived issue, statute, outcome, reason, citation, evidence, and investigation-lapse graph with paragraph-level provenance and confidence status.</p>
+    <h3>3. Legal Doctrine and Policing Lessons Wiki</h3>
+    <p>Reviewed topic articles such as NDPS search compliance, POCSO age proof, hostile witnesses, chain of custody, and court-specific acquittal patterns. Every material claim must cite source judgments and exact chunks or paragraphs.</p>
+  </section>
+
+  <section class="card">
+    <h2>Risk Register</h2>
+    <table>
+      <thead><tr><th>Risk</th><th>Severity</th><th>Mitigation</th></tr></thead>
+      <tbody>
+        <tr><td>Generated article misstates law</td><td>Critical</td><td>Legal review, citation gates, paragraph references.</td></tr>
+        <tr><td>Corpus scale overwhelms wiki</td><td>Critical</td><td>Topic/court/year scoped wikis and hierarchical indexes.</td></tr>
+        <tr><td>Graph edges appear authoritative</td><td>High</td><td>Confidence labels, provenance, review status, UI warnings.</td></tr>
+        <tr><td>Court-specific doctrine is flattened</td><td>High</td><td>Court scope, date range, precedential status, negative treatment.</td></tr>
+        <tr><td>Officer advice becomes biased</td><td>High</td><td>Frame around lawful evidence quality, due process, and procedural compliance.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>First Pilot</h2>
+    <p>Start with one issue family: NDPS search and seizure compliance or POCSO age proof. Use Supreme Court plus two High Courts over five years, target 500 to 2,000 judgments, and produce 30 to 50 reviewed wiki articles.</p>
+    <p>Success requires verified citations for every approved claim, better consistency than raw RAG alone, and coverage-gap logs that identify the next articles to compile.</p>
+  </section>
+</main>
+</body>
+</html>

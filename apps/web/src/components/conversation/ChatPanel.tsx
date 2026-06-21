@@ -22,6 +22,11 @@ interface Citation {
   page_number: number | null;
   excerpt: string;
   relevance_score: number;
+  source_language?: string | null;
+  target_language?: string | null;
+  translation_status?: string | null;
+  translated_excerpt?: string | null;
+  original_excerpt?: string | null;
 }
 
 interface Message {
@@ -58,6 +63,15 @@ interface QueryResult {
   };
 }
 
+const LEGAL_FEEDBACK_TAGS = [
+  { id: "graph_edge_wrong", label: "Wrong graph edge" },
+  { id: "wiki_claim_weak", label: "Weak wiki claim" },
+  { id: "missing_citation", label: "Missing citation" },
+  { id: "vector_chunk_bad", label: "Bad raw chunk" },
+  { id: "metadata_filter_wrong", label: "Bad metadata filter" },
+  { id: "answer_useful", label: "Useful answer" },
+];
+
 function buildRenumberMap(citations: Citation[]): Record<number, number> {
   const sorted = [...citations].sort((a, b) => a.citation_index - b.citation_index);
   const map: Record<number, number> = {};
@@ -85,7 +99,10 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
   const [journeyMessageId, setJourneyMessageId] = useState<string | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState<string | null>(null);
   const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackTags, setFeedbackTags] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const prevConversationIdRef = useRef(conversationId);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const qc = useQueryClient();
 
@@ -97,7 +114,7 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
 
   const messages = conversation?.messages || [];
 
-  const [mode, setMode] = useState<"hybrid" | "vector_only" | "metadata_only" | "graph_only">("hybrid");
+  const [mode, setMode] = useState<"hybrid" | "vector_only" | "metadata_only" | "graph_only" | "wiki_only">("hybrid");
 
   const queryMutation = useMutation({
     mutationFn: ({ question, regenerate }: { question: string; regenerate?: boolean }) =>
@@ -147,8 +164,17 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
   }, [conversationId]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, queryMutation.isPending, pendingQuestion, showOptimisticAnswer]);
+    // Scroll to TOP when switching to a different conversation
+    if (prevConversationIdRef.current !== conversationId) {
+      prevConversationIdRef.current = conversationId;
+      messagesContainerRef.current?.scrollTo({ top: 0 });
+      return;
+    }
+    // Only scroll to bottom for new messages (user action)
+    if (pendingQuestion || queryMutation.isPending || showOptimisticAnswer) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [conversationId, messages.length, queryMutation.isPending, pendingQuestion, showOptimisticAnswer]);
 
   // Auto-resize textarea
   const adjustTextareaHeight = useCallback(() => {
@@ -213,6 +239,7 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
         conversation_id: conversationId,
         feedback_level: level,
         feedback_text: feedbackText || undefined,
+        issue_tags: feedbackTags.length > 0 ? feedbackTags : level === "HELPFUL" ? ["answer_useful"] : undefined,
       });
     } catch {
       // Non-critical
@@ -227,11 +254,13 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
         conversation_id: conversationId,
         feedback_type: "TEXT",
         feedback_text: feedbackText,
+        issue_tags: feedbackTags.length > 0 ? feedbackTags : undefined,
       });
     } catch {
       // Non-critical
     }
     setFeedbackText("");
+    setFeedbackTags([]);
     setFeedbackOpen(null);
   };
 
@@ -267,7 +296,7 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
       ) : (
       <>
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
         {/* Skeleton loader while conversation messages are loading */}
         {conversationLoading && conversationId && (
           <div className="space-y-4" aria-label="Loading messages" role="status">
@@ -427,6 +456,10 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
                               document_title: c.document_title,
                               page_number: c.page_number,
                               excerpt: c.excerpt,
+                              source_language: c.source_language,
+                              target_language: c.target_language,
+                              translation_status: c.translation_status,
+                              original_excerpt: c.original_excerpt,
                             })),
                         );
                       }}
@@ -466,6 +499,25 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
                   {/* FR-018/AC-05: Optional feedback text input */}
                   {feedbackOpen === msg.message_id && (
                     <div className="mt-2 space-y-1.5">
+                      <div className="flex flex-wrap gap-1.5">
+                        {LEGAL_FEEDBACK_TAGS.map((tag) => {
+                          const selected = feedbackTags.includes(tag.id);
+                          return (
+                            <button
+                              key={tag.id}
+                              type="button"
+                              onClick={() => setFeedbackTags((prev) => selected ? prev.filter((item) => item !== tag.id) : [...prev, tag.id])}
+                              className={`rounded-full border px-2 py-1 text-[11px] transition-colors ${
+                                selected
+                                  ? "border-primary-500 bg-primary-50 text-primary-700"
+                                  : "border-skin bg-surface text-skin-muted hover:bg-surface-alt"
+                              }`}
+                            >
+                              {tag.label}
+                            </button>
+                          );
+                        })}
+                      </div>
                       <textarea
                         value={feedbackText}
                         onChange={(e) => setFeedbackText(e.target.value)}
@@ -483,7 +535,7 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
                         </button>
                         <button
                           type="button"
-                          onClick={() => { setFeedbackOpen(null); setFeedbackText(""); }}
+                          onClick={() => { setFeedbackOpen(null); setFeedbackText(""); setFeedbackTags([]); }}
                           className="text-xs px-3 py-1 text-skin-muted hover:text-skin-base"
                         >
                           Dismiss
@@ -641,6 +693,7 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
             <option value="vector_only">Vector only</option>
             <option value="metadata_only">Metadata only</option>
             <option value="graph_only">Graph only</option>
+            <option value="wiki_only">Wiki only</option>
           </select>
         </div>
         <div className="flex gap-2 items-end">

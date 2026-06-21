@@ -38,6 +38,7 @@ export function FeedbackDashboardPage() {
   const qc = useQueryClient();
   const [levelFilter, setLevelFilter] = useState<string>("");
   const [resolvedFilter, setResolvedFilter] = useState<string>("");
+  const [layerFilter, setLayerFilter] = useState<string>("");
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [adminNotes, setAdminNotes] = useState("");
 
@@ -55,6 +56,10 @@ export function FeedbackDashboardPage() {
     queryKey: ["feedback-list", levelFilter, resolvedFilter],
     queryFn: () =>
       apiFetch<{ feedback: FeedbackItem[] }>(`/api/v1/feedback?${params.toString()}`),
+  });
+  const filteredFeedback = (data?.feedback || []).filter((fb) => {
+    if (!layerFilter) return true;
+    return (fb.issue_tags || []).includes(layerFilter);
   });
 
   const resolveMutation = useMutation({
@@ -122,19 +127,33 @@ export function FeedbackDashboardPage() {
           <option value="unresolved">Unresolved</option>
           <option value="resolved">Resolved</option>
         </select>
+        <select
+          value={layerFilter}
+          onChange={(e) => setLayerFilter(e.target.value)}
+          className="text-xs px-2 py-1.5 border border-border-primary rounded-lg bg-surface-primary text-text-primary"
+          aria-label="Filter by retrieval layer"
+        >
+          <option value="">All layers</option>
+          <option value="wiki_claim_weak">Weak wiki claim</option>
+          <option value="graph_edge_wrong">Wrong graph edge</option>
+          <option value="missing_citation">Missing citation</option>
+          <option value="vector_chunk_bad">Bad raw chunk</option>
+          <option value="metadata_filter_wrong">Bad metadata filter</option>
+          <option value="answer_useful">Useful answer</option>
+        </select>
       </div>
 
       {/* Feedback list */}
       {isLoading ? (
         <div className="flex justify-center py-12"><Loader2 className="animate-spin text-text-tertiary" /></div>
-      ) : !data?.feedback || data.feedback.length === 0 ? (
+      ) : filteredFeedback.length === 0 ? (
         <div className="text-center py-12 text-text-tertiary">
           <MessageSquare size={40} className="mx-auto mb-3 opacity-40" />
           <p>No feedback matching filters.</p>
         </div>
       ) : (
         <div className="space-y-3">
-          {data.feedback.map((fb) => (
+          {filteredFeedback.map((fb) => (
             <div
               key={fb.feedback_id}
               className="bg-surface-primary border border-border-primary rounded-xl p-4"

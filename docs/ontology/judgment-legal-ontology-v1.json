@@ -1,0 +1,316 @@
+{
+  "version": "judgment-legal-ontology-v1",
+  "domain": "Indian criminal judgments and police court-readiness analysis",
+  "description": "Ontology for extracting legally useful entities, relationships, assertions, outcomes, and investigation-quality factors from Supreme Court, High Court, and district/trial-court judgments.",
+  "nodeTypes": [
+    {
+      "type": "judgment",
+      "label": "Judgment / Order",
+      "subtypes": ["final_judgment", "interim_order", "bail_order", "appeal_judgment", "revision_order", "reference_order"]
+    },
+    {
+      "type": "case",
+      "label": "Case / Proceeding",
+      "subtypes": ["criminal_appeal", "criminal_revision", "writ_petition", "bail_application", "special_leave_petition", "trial_case"]
+    },
+    {
+      "type": "court",
+      "label": "Court",
+      "subtypes": ["supreme_court", "high_court", "sessions_court", "special_court", "magistrate_court", "tribunal"]
+    },
+    {
+      "type": "bench",
+      "label": "Bench",
+      "subtypes": ["single_judge", "division_bench", "full_bench", "constitution_bench"]
+    },
+    {
+      "type": "judge",
+      "label": "Judge"
+    },
+    {
+      "type": "party",
+      "label": "Party",
+      "subtypes": ["state", "police", "accused", "appellant", "respondent", "petitioner", "complainant", "victim", "informant", "prosecution", "defence"]
+    },
+    {
+      "type": "person",
+      "label": "Person",
+      "subtypes": ["victim", "accused", "witness", "investigating_officer", "police_officer", "medical_officer", "forensic_expert", "magistrate", "counsel"]
+    },
+    {
+      "type": "agency",
+      "label": "Agency / Department",
+      "subtypes": ["police_station", "investigating_agency", "forensic_lab", "medical_board", "prosecution_department", "child_welfare_committee"]
+    },
+    {
+      "type": "statute",
+      "label": "Statute / Code",
+      "subtypes": ["ipc", "bns", "crpc", "bnss", "evidence_act", "bsa", "pocso", "ndps", "jj_act", "sc_st_act", "arms_act"]
+    },
+    {
+      "type": "legal_regime",
+      "label": "Applicable Legal Regime / Statutory Version",
+      "subtypes": ["ipc_crpc_evidence_act", "bns_bnss_bsa", "transition_period", "special_statute", "state_amendment", "unknown"]
+    },
+    {
+      "type": "statutory_section",
+      "label": "Statutory Section",
+      "subtypes": ["offence_section", "procedural_section", "evidence_section", "sentencing_section", "appeal_section"]
+    },
+    {
+      "type": "offence",
+      "label": "Offence",
+      "subtypes": ["murder", "rape", "sexual_assault", "pocso_offence", "kidnapping", "abduction", "ndps_offence", "attempt", "conspiracy", "common_intention", "common_object"]
+    },
+    {
+      "type": "charge",
+      "label": "Charge / Accusation",
+      "subtypes": ["framed_charge", "altered_charge", "convicted_charge", "acquitted_charge"]
+    },
+    {
+      "type": "legal_issue",
+      "label": "Legal Issue",
+      "subtypes": ["delay_in_fir", "consent", "age_determination", "identity", "mens_rea", "common_intention", "search_and_seizure", "chain_of_custody", "hostile_witness", "witness_credibility", "medical_corroboration", "electronic_evidence", "bail_conditions", "sentencing", "section_50_ndps", "section_27_recovery", "benefit_of_doubt"]
+    },
+    {
+      "type": "legal_test",
+      "label": "Legal Test / Standard",
+      "subtypes": ["beyond_reasonable_doubt", "preponderance", "prima_facie", "last_seen", "circumstantial_chain", "sterling_witness", "presumption", "reverse_burden", "strict_compliance", "substantial_compliance", "prejudice_test", "admissibility_test", "standard_of_review", "materiality"]
+    },
+    {
+      "type": "procedural_requirement",
+      "label": "Procedural Requirement",
+      "subtypes": ["fir_registration", "section_161_statement", "section_164_statement", "medical_examination", "seizure_memo", "arrest_memo", "sampling", "seal_integrity", "fsl_dispatch", "notice_requirement", "independent_witness", "search_authorization", "custody_production", "section_50_option_notice", "gazetted_officer_or_magistrate", "personal_search_safeguard"]
+    },
+    {
+      "type": "evidence",
+      "label": "Evidence / Exhibit",
+      "subtypes": ["oral_testimony", "documentary_evidence", "medical_evidence", "forensic_evidence", "electronic_evidence", "recovery_evidence", "confession", "disclosure_statement", "identification", "call_detail_record", "cctv", "dna", "seizure_article", "injury_report", "age_proof"]
+    },
+    {
+      "type": "investigation_step",
+      "label": "Investigation Step",
+      "subtypes": ["fir", "spot_inspection", "witness_examination", "medical_exam", "arrest", "search", "seizure", "sample_collection", "sample_dispatch", "forensic_analysis", "chargesheet", "test_identification_parade", "recovery"]
+    },
+    {
+      "type": "investigation_lapse",
+      "label": "Investigation / Prosecution Lapse",
+      "subtypes": ["delay_in_fir", "unexplained_delay", "missing_independent_witness", "non_compliance_search", "seal_tampering_risk", "chain_of_custody_gap", "contradictory_witnesses", "hostile_witness", "non_examination_material_witness", "defective_medical_evidence", "age_proof_gap", "forensic_delay", "improper_sampling", "site_plan_gap", "case_diary_gap", "procedural_non_compliance"]
+    },
+    {
+      "type": "argument",
+      "label": "Argument / Submission",
+      "subtypes": ["prosecution_argument", "defence_argument", "state_argument", "appellant_argument", "respondent_argument", "amicus_argument"]
+    },
+    {
+      "type": "finding",
+      "label": "Finding of Fact / Law",
+      "subtypes": ["fact_found", "fact_not_proved", "law_applied", "law_distinguished", "credibility_finding", "evidence_finding", "procedural_finding"]
+    },
+    {
+      "type": "holding",
+      "label": "Holding / Ratio",
+      "subtypes": ["ratio", "obiter", "direction", "guideline", "interpretation", "standard_applied"]
+    },
+    {
+      "type": "reason",
+      "label": "Reason / Rationale",
+      "subtypes": ["evidence_reason", "procedure_reason", "credibility_reason", "statutory_reason", "precedent_reason", "constitutional_reason", "sentencing_reason"]
+    },
+    {
+      "type": "outcome",
+      "label": "Outcome",
+      "subtypes": ["conviction_upheld", "conviction_set_aside", "acquittal", "acquittal_reversed", "appeal_allowed", "appeal_dismissed", "bail_granted", "bail_rejected", "sentence_enhanced", "sentence_reduced", "remand", "compensation_awarded", "directions_issued"]
+    },
+    {
+      "type": "sentence",
+      "label": "Sentence / Punishment",
+      "subtypes": ["imprisonment", "life_imprisonment", "death_penalty", "fine", "compensation", "probation", "default_sentence"]
+    },
+    {
+      "type": "relief",
+      "label": "Relief / Direction",
+      "subtypes": ["bail", "acquittal", "conviction", "retrial", "compensation", "investigation_direction", "policy_direction", "sentence_modification"]
+    },
+    {
+      "type": "precedent",
+      "label": "Precedent / Cited Case",
+      "subtypes": ["binding_precedent", "persuasive_precedent", "distinguished_case", "overruled_case", "followed_case"]
+    },
+    {
+      "type": "authority_status",
+      "label": "Authority Status / Later Treatment",
+      "subtypes": ["binding", "persuasive", "followed", "distinguished", "overruled", "disapproved", "per_incuriam", "doubted", "unknown"]
+    },
+    {
+      "type": "citation",
+      "label": "Citation",
+      "subtypes": ["neutral_citation", "reporter_citation", "case_number", "cnr", "fir_number", "crime_number"]
+    },
+    {
+      "type": "date",
+      "label": "Date",
+      "subtypes": ["incident_date", "fir_date", "arrest_date", "judgment_date", "medical_exam_date", "seizure_date", "fsl_date", "hearing_date"]
+    },
+    {
+      "type": "location",
+      "label": "Location",
+      "subtypes": ["crime_scene", "police_station", "court_location", "recovery_place", "medical_facility", "forensic_lab", "residence", "public_place"]
+    },
+    {
+      "type": "document_record",
+      "label": "Document / Record",
+      "subtypes": ["fir", "chargesheet", "case_diary", "seizure_memo", "arrest_memo", "medical_report", "fsl_report", "postmortem_report", "birth_certificate", "school_record", "section_161_statement", "section_164_statement", "call_record", "site_plan"]
+    },
+    {
+      "type": "source_quality",
+      "label": "Source Quality / OCR Status",
+      "subtypes": ["born_digital", "scanned_pdf", "ocr_high_confidence", "ocr_low_confidence", "metadata_incomplete", "paragraph_anchored", "page_only_anchor", "unverified_source"]
+    },
+    {
+      "type": "sensitive_data_marker",
+      "label": "Sensitive Data Marker",
+      "subtypes": ["victim_identity", "minor_identity", "sexual_offence_detail", "medical_identity_detail", "address_or_family_identifier", "sealed_record", "redacted_text"]
+    },
+    {
+      "type": "corpus_scope",
+      "label": "Corpus Scope / Validity Card",
+      "subtypes": ["court_year_bucket", "source_bucket", "license_bucket", "ocr_failure_bucket", "missing_metadata_bucket", "reported_unreported_caveat", "selection_denominator"]
+    }
+  ],
+  "edgeTypes": [
+    { "type": "decided_by", "label": "Judgment decided by court", "directed": true },
+    { "type": "heard_by", "label": "Case heard by bench or judge", "directed": true },
+    { "type": "authored_by", "label": "Judgment authored by judge", "directed": true },
+    { "type": "party_to", "label": "Party participates in case", "directed": true },
+    { "type": "represents", "label": "Counsel represents party", "directed": true },
+    { "type": "appeal_from", "label": "Appeal arises from lower court judgment", "directed": true },
+    { "type": "cites", "label": "Judgment cites precedent", "directed": true },
+    { "type": "follows", "label": "Judgment follows precedent", "directed": true },
+    { "type": "distinguishes", "label": "Judgment distinguishes precedent", "directed": true },
+    { "type": "overrules_or_disapproves", "label": "Judgment overrules or disapproves precedent", "directed": true },
+    { "type": "interprets", "label": "Judgment interprets statute or section", "directed": true },
+    { "type": "applies", "label": "Judgment applies statute, test, or precedent", "directed": true },
+    { "type": "governed_by_regime", "label": "Judgment, charge, or issue governed by legal regime", "directed": true },
+    { "type": "law_applicable_on", "label": "Legal regime applies as of incident, offence, or judgment date", "directed": true },
+    { "type": "charges_under", "label": "Charge framed under statutory section", "directed": true },
+    { "type": "convicted_under", "label": "Conviction under statutory section", "directed": true },
+    { "type": "acquitted_of", "label": "Acquittal of offence or charge", "directed": true },
+    { "type": "has_authority_status", "label": "Judgment or precedent has authority status", "directed": true },
+    { "type": "later_treated_as", "label": "Later judgment treats precedent as followed, distinguished, overruled, or otherwise limited", "directed": true },
+    { "type": "concerns_issue", "label": "Judgment or case concerns legal issue", "directed": true },
+    { "type": "issue_decided_by", "label": "Legal issue decided by holding", "directed": true },
+    { "type": "holding_supported_by", "label": "Holding supported by reason", "directed": true },
+    { "type": "reason_based_on", "label": "Reason based on evidence, statute, precedent, or finding", "directed": true },
+    { "type": "finding_on", "label": "Finding on fact, issue, evidence, or procedure", "directed": true },
+    { "type": "outcome_of", "label": "Outcome of case, appeal, charge, or party", "directed": true },
+    { "type": "outcome_for_party", "label": "Outcome for a specific accused, victim, state, or party", "directed": true },
+    { "type": "outcome_for_charge", "label": "Outcome for a specific charge", "directed": true },
+    { "type": "outcome_for_section", "label": "Outcome for a specific statutory section", "directed": true },
+    { "type": "outcome_caused_by", "label": "Outcome caused or materially influenced by reason/lapse/evidence", "directed": true },
+    { "type": "supports_conviction", "label": "Evidence or reason supports conviction", "directed": true },
+    { "type": "supports_acquittal", "label": "Evidence gap, lapse, or reason supports acquittal", "directed": true },
+    { "type": "evidence_relied_on", "label": "Court relied on evidence", "directed": true },
+    { "type": "evidence_rejected_because", "label": "Court rejected evidence for reason", "directed": true },
+    { "type": "evidence_contradicts", "label": "Evidence contradicts witness, fact, or argument", "directed": true },
+    { "type": "witness_testified_to", "label": "Witness testified to fact or event", "directed": true },
+    { "type": "procedural_requirement_for", "label": "Requirement applies to investigation step, offence, or statute", "directed": true },
+    { "type": "complied_with", "label": "Police/prosecution complied with requirement", "directed": true },
+    { "type": "non_compliance_with", "label": "Police/prosecution failed to comply with requirement", "directed": true },
+    { "type": "investigation_lapse_in", "label": "Investigation lapse occurred in case or step", "directed": true },
+    { "type": "lapse_caused_doubt", "label": "Lapse created reasonable doubt", "directed": true },
+    { "type": "seized_from", "label": "Evidence seized from person or location", "directed": true },
+    { "type": "recovered_from", "label": "Evidence recovered from person or location", "directed": true },
+    { "type": "chain_of_custody_for", "label": "Chain of custody relationship for evidence", "directed": true },
+    { "type": "occurred_on", "label": "Event occurred on date", "directed": true },
+    { "type": "occurred_at", "label": "Event occurred at location", "directed": true },
+    { "type": "has_source_quality", "label": "Judgment, chunk, or metadata record has source quality marker", "directed": true },
+    { "type": "has_sensitive_marker", "label": "Judgment or source span contains sensitive data marker", "directed": true },
+    { "type": "requires_redaction", "label": "Sensitive item requires redaction before display or export", "directed": true },
+    { "type": "belongs_to_corpus_scope", "label": "Judgment belongs to corpus validity bucket", "directed": true },
+    { "type": "supported_by_source_span", "label": "Assertion or edge is supported by a quoted paragraph or page span", "directed": true },
+    { "type": "sentenced_to", "label": "Person sentenced to punishment", "directed": true },
+    { "type": "grants_relief", "label": "Court grants relief", "directed": true },
+    { "type": "denies_relief", "label": "Court denies relief", "directed": true },
+    { "type": "remands_to", "label": "Court remands matter to authority/court", "directed": true },
+    { "type": "same_as", "label": "Equivalent or duplicate entity", "directed": false },
+    { "type": "related_to", "label": "Related but unspecified legal relationship", "directed": true }
+  ],
+  "assertionTypes": [
+    "allegation",
+    "admitted_fact",
+    "disputed_fact",
+    "finding_of_fact",
+    "finding_of_law",
+    "holding",
+    "ratio",
+    "obiter",
+    "procedural_defect",
+    "investigation_lapse",
+    "evidence_gap",
+    "credibility_assessment",
+    "outcome_reason",
+    "authority_treatment",
+    "temporal_validity",
+    "source_quality_note",
+    "redaction_requirement",
+    "corpus_validity_note",
+    "officer_lesson"
+  ],
+  "extractionRules": [
+    "Distinguish allegations, arguments, findings, holdings, and final outcomes. Do not treat a party submission as a court finding.",
+    "Prefer precise statutory section nodes over broad statute nodes when a section is mentioned.",
+    "Capture police and prosecution lapses only when the court discusses them, not merely because a party alleges them.",
+    "For every outcome edge, capture the reason or evidence relationship that the court relied on when available.",
+    "Capture precedents separately from the judgment being processed and mark whether they were followed, distinguished, or disapproved when stated.",
+    "For judgment workspaces, use only ontology-approved node and edge types in the approved graph. Quarantine any proposed new type for reviewer action.",
+    "Capture authority status and later treatment only when stated by the judgment, a recognized citation source, or a reviewed legal update.",
+    "Capture legal regime using the offence or incident date when available. Do not assume BNS/BNSS/BSA applicability merely because the judgment was delivered after transition.",
+    "Use investigation_lapse nodes only for legally material lapses such as delay, non-compliance, missing witnesses, chain-of-custody gaps, and forensic defects.",
+    "High-risk causal edges such as outcome_caused_by, supports_acquittal, lapse_caused_doubt, and non_compliance_with require a quoted source span before promotion to reviewed status.",
+    "Mark victim, minor, sexual-offence, sealed-record, and medical-identity details with sensitive_data_marker nodes when present.",
+    "When a judgment contains both conviction and acquittal for different accused or charges, create separate outcome nodes or edges for each party/charge.",
+    "For district/trial-court judgments, capture witness credibility, evidence gaps, bail reasoning, sentencing, and procedural defects only when the court states them.",
+    "Do not infer guilt, innocence, police misconduct, witness credibility, or officer-facing lessons beyond the judgment text and reviewer-approved guidance."
+  ],
+  "answerUseGuidance": [
+    "Use reviewed wiki articles for doctrine and recurring lessons.",
+    "Use graph paths for relationships between issues, evidence, lapses, outcomes, courts, and statutes.",
+    "Use raw chunks from the vector and lexical indexes for every answer that makes a source-specific claim.",
+    "Expose confidence and review status when graph or wiki information is not fully reviewed.",
+    "Include a corpus validity card for pattern or success-rate answers.",
+    "Suppress or redact sensitive identities unless the user role is authorized and the access is audited."
+  ],
+  "phase0EvidenceContract": {
+    "pilotScope": {
+      "domain": "NDPS Section 50, personal search, search and seizure, and chain-of-custody issues",
+      "courts": ["Supreme Court of India", "Delhi High Court", "Punjab and Haryana High Court"],
+      "years": ["2020", "2021", "2022", "2023", "2024", "2025"],
+      "purpose": "Validate outcome reasoning, authority treatment, source-span provenance, and officer-facing investigation lessons before expanding to POCSO or other offence families."
+    },
+    "requiredJudgmentFields": [
+      "canonical_judgment_id",
+      "source_uri",
+      "court_code",
+      "bench_strength",
+      "appeal_posture",
+      "decision_date",
+      "incident_or_offence_date",
+      "applicable_legal_regime",
+      "statute_versions",
+      "paragraph_or_page_anchors",
+      "ocr_confidence",
+      "per_accused_outcomes",
+      "per_charge_outcomes",
+      "outcome_reasons",
+      "sensitive_data_flags"
+    ],
+    "highRiskEdges": ["outcome_caused_by", "supports_acquittal", "supports_conviction", "lapse_caused_doubt", "non_compliance_with"],
+    "promotionRules": [
+      "High-risk edges require a quoted source span.",
+      "Officer lessons require reviewer approval.",
+      "Pattern analytics require corpus validity metrics.",
+      "Sensitive source spans require redaction policy evaluation before display."
+    ]
+  }
+}
