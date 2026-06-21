@@ -764,31 +764,44 @@ def _call_openai_json(prompt: str) -> dict:
 
 
 def _call_gemini_json(prompt: str) -> dict:
-    """Call Gemini generateContent in strict JSON mode."""
-    response = httpx.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{_get_kg_model_id()}:generateContent",
-        headers={"Content-Type": "application/json"},
-        params={"key": config.GEMINI_API_KEY},
-        json={
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": config.KG_EXTRACTION_TEMPERATURE,
-                "maxOutputTokens": 4096,
-                "responseMimeType": "application/json",
-                # Structured extraction does not need reasoning; disabling "thinking"
-                # cuts gemini-2.5-flash per-call latency dramatically (KG throughput).
-                "thinkingConfig": {"thinkingBudget": 0},
-            },
-        },
-        timeout=60.0,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    candidates = payload.get("candidates") or []
-    content = ((candidates[0] or {}).get("content") or {}) if candidates else {}
-    parts = content.get("parts") or []
-    text = "".join(str(part.get("text", "")) for part in parts if isinstance(part, dict))
-    return json.loads(text or "{}")
+    """Call Gemini generateContent in strict JSON mode, retrying transient 429/5xx with backoff."""
+    last_exc = None
+    for attempt in range(5):
+        try:
+            response = httpx.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{_get_kg_model_id()}:generateContent",
+                headers={"Content-Type": "application/json"},
+                params={"key": config.GEMINI_API_KEY},
+                json={
+                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "temperature": config.KG_EXTRACTION_TEMPERATURE,
+                        "maxOutputTokens": 4096,
+                        "responseMimeType": "application/json",
+                        # Structured extraction does not need reasoning; disabling "thinking"
+                        # cuts gemini-2.5-flash per-call latency dramatically (KG throughput).
+                        "thinkingConfig": {"thinkingBudget": 0},
+                    },
+                },
+                timeout=60.0,
+            )
+            # Gemini returns 503 "high demand" intermittently; retry transient statuses.
+            if response.status_code in (429, 500, 502, 503, 504):
+                raise RuntimeError(f"Gemini transient HTTP {response.status_code}")
+            response.raise_for_status()
+            payload = response.json()
+            candidates = payload.get("candidates") or []
+            content = ((candidates[0] or {}).get("content") or {}) if candidates else {}
+            parts = content.get("parts") or []
+            text = "".join(str(part.get("text", "")) for part in parts if isinstance(part, dict))
+            return json.loads(text or "{}")
+        except Exception as e:
+            last_exc = e
+            if attempt < 4:
+                time.sleep(min(1.5 * (2 ** attempt) + (time.time() % 1.0), 30.0))  # backoff + jitter
+                continue
+            raise
+    raise last_exc
 
 
 def _call_kg_json(prompt: str) -> dict:
@@ -819,34 +832,41 @@ def _extract_with_direct_json_fallback(content: str, prompt: str, examples: list
         logger.warning(f"Direct JSON KG extraction fallback failed: {exc}")
         return []
 
+_LX_TRANSIENT_MARKERS = ("503", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "429", "high demand", "overloaded", "rate limit")
+
+
 def _lx_extract(content: str, prompt: str, examples: list) -> list:
-    """Run lx.extract() with OpenAI configuration. Returns list of Extraction objects."""
-    try:
-        provider = _get_kg_provider()
-        if provider == "openai":
-            _patch_langextract_openai_provider()
-        result = lx.extract(
-            text_or_documents=content[:4000],
-            prompt_description=prompt,
-            examples=examples,
-            model_id=_get_kg_model_id(),
-            api_key=_get_kg_api_key(),
-            fence_output=None if provider == "gemini" else True,
-            use_schema_constraints=(provider == "gemini"),
-            language_model_params={
-                "temperature": config.KG_EXTRACTION_TEMPERATURE,
-                "max_output_tokens": 4096,
-            },
-        )
-        # langextract 1.x returns AnnotatedDocument; extract the list
-        if hasattr(result, "extractions"):
-            return result.extractions or []
-        if isinstance(result, list):
-            return result
-        return _extract_with_direct_json_fallback(content, prompt, examples)
-    except Exception as e:
-        logger.warning(f"LangExtract call failed: {e}")
-        return _extract_with_direct_json_fallback(content, prompt, examples)
+    """Run lx.extract(); retry transient API errors (503/429) with backoff before falling back."""
+    provider = _get_kg_provider()
+    if provider == "openai":
+        _patch_langextract_openai_provider()
+    for attempt in range(4):
+        try:
+            result = lx.extract(
+                text_or_documents=content[:4000],
+                prompt_description=prompt,
+                examples=examples,
+                model_id=_get_kg_model_id(),
+                api_key=_get_kg_api_key(),
+                fence_output=None if provider == "gemini" else True,
+                use_schema_constraints=(provider == "gemini"),
+                language_model_params={
+                    "temperature": config.KG_EXTRACTION_TEMPERATURE,
+                    "max_output_tokens": 4096,
+                },
+            )
+            # langextract 1.x returns AnnotatedDocument; extract the list
+            if hasattr(result, "extractions"):
+                return result.extractions or []
+            if isinstance(result, list):
+                return result
+            return _extract_with_direct_json_fallback(content, prompt, examples)
+        except Exception as e:
+            if any(m in str(e) for m in _LX_TRANSIENT_MARKERS) and attempt < 3:
+                time.sleep(min(1.5 * (2 ** attempt) + (time.time() % 1.0), 30.0))
+                continue
+            logger.warning(f"LangExtract call failed: {e}")
+            return _extract_with_direct_json_fallback(content, prompt, examples)
 
 
 def _normalize_type_token(value: str) -> str:
