@@ -775,6 +775,9 @@ def _call_gemini_json(prompt: str) -> dict:
                 "temperature": config.KG_EXTRACTION_TEMPERATURE,
                 "maxOutputTokens": 4096,
                 "responseMimeType": "application/json",
+                # Structured extraction does not need reasoning; disabling "thinking"
+                # cuts gemini-2.5-flash per-call latency dramatically (KG throughput).
+                "thinkingConfig": {"thinkingBudget": 0},
             },
         },
         timeout=60.0,

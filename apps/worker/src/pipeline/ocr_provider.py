@@ -171,8 +171,38 @@ def ocr_image(file_path: str, document_id: str, mime_type: str) -> tuple:
     return text, page_count
 
 
+DOCAI_PAGE_LIMIT = 15  # Document AI online process() hard page limit
+
+
+def _split_pdf_to_batches(content: bytes, batch_size: int = DOCAI_PAGE_LIMIT) -> list:
+    """Split a PDF into <=batch_size-page chunks (Document AI online caps at 15 pages).
+
+    Avoids PAGE_LIMIT_EXCEEDED on large PDFs (which otherwise fell back to slow
+    pytesseract for the whole document). Returns a list of PDF byte blobs in order.
+    """
+    import io
+    from pypdf import PdfReader, PdfWriter
+    reader = PdfReader(io.BytesIO(content))
+    total = len(reader.pages)
+    if total <= batch_size:
+        return [content]
+    batches = []
+    for start in range(0, total, batch_size):
+        writer = PdfWriter()
+        for i in range(start, min(start + batch_size, total)):
+            writer.add_page(reader.pages[i])
+        buf = io.BytesIO()
+        writer.write(buf)
+        batches.append(buf.getvalue())
+    return batches
+
+
 def _ocr_document_ai(file_path: str, document_id: str, mime_type: str) -> tuple:
-    """OCR using Google Document AI with structure preservation (FR-003/AC-04)."""
+    """OCR using Google Document AI with structure preservation (FR-003/AC-04).
+
+    PDFs are processed in <=15-page batches to respect Document AI's online page
+    limit, keeping accurate Document AI OCR instead of the slow pytesseract fallback.
+    """
     documentai = _get_documentai_module()
     client = _get_document_ai_client()
     name = _get_processor_name(client)
@@ -180,42 +210,38 @@ def _ocr_document_ai(file_path: str, document_id: str, mime_type: str) -> tuple:
     with open(file_path, "rb") as f:
         content = f.read()
 
-    request = documentai.ProcessRequest(
-        name=name,
-        raw_document=documentai.RawDocument(content=content, mime_type=mime_type),
-    )
-
-    result = client.process_document(request=request, timeout=config.OCR_PAGE_TIMEOUT_S)
-    document = result.document
+    batches = _split_pdf_to_batches(content) if mime_type == "application/pdf" else [content]
 
     page_texts = []
     total_confidence = 0.0
+    page_index = 0
+    for batch in batches:
+        request = documentai.ProcessRequest(
+            name=name,
+            raw_document=documentai.RawDocument(content=batch, mime_type=mime_type),
+        )
+        result = client.process_document(request=request, timeout=config.OCR_PAGE_TIMEOUT_S)
+        document = result.document
+        for page in document.pages:
+            page_text = _extract_structured_page(document, page)
+            block_count = len(page.blocks)
+            page_conf = sum(block.layout.confidence for block in page.blocks)
+            avg_conf = page_conf / block_count if block_count > 0 else 0.0
+            page_texts.append(page_text)
+            total_confidence += avg_conf
+            if avg_conf < config.OCR_CONFIDENCE_THRESHOLD:
+                logger.warning(
+                    "OCR page confidence below threshold",
+                    extra={
+                        "document_id": document_id,
+                        "page": page_index + 1,
+                        "confidence": round(avg_conf, 3),
+                        "threshold": config.OCR_CONFIDENCE_THRESHOLD,
+                    },
+                )
+            page_index += 1
 
-    for i, page in enumerate(document.pages):
-        page_text = _extract_structured_page(document, page)
-
-        page_conf = 0.0
-        block_count = 0
-        for block in page.blocks:
-            page_conf += block.layout.confidence
-            block_count += 1
-
-        avg_conf = page_conf / block_count if block_count > 0 else 0.0
-        page_texts.append(page_text)
-        total_confidence += avg_conf
-
-        if avg_conf < config.OCR_CONFIDENCE_THRESHOLD:
-            logger.warning(
-                "OCR page confidence below threshold",
-                extra={
-                    "document_id": document_id,
-                    "page": i + 1,
-                    "confidence": round(avg_conf, 3),
-                    "threshold": config.OCR_CONFIDENCE_THRESHOLD,
-                }
-            )
-
-    page_count = len(document.pages) or 1
+    page_count = len(page_texts) or 1
     avg_confidence = total_confidence / page_count if page_count > 0 else 0.0
     full_text = "\f".join(page_texts)
 
@@ -312,28 +338,28 @@ def _ocr_document_ai_pages(file_path: str, document_id: str, page_indices: list)
     with open(file_path, "rb") as f:
         content = f.read()
 
-    request = documentai.ProcessRequest(
-        name=name,
-        raw_document=documentai.RawDocument(content=content, mime_type="application/pdf"),
-    )
-
-    result = client.process_document(request=request, timeout=config.OCR_PAGE_TIMEOUT_S)
-    document = result.document
-
+    wanted = set(page_indices)
     page_results = {}
     page_confidences = []
-    for page_idx in page_indices:
-        if page_idx < len(document.pages):
-            page = document.pages[page_idx]
-            page_text = _extract_structured_page(document, page)
-            page_results[page_idx] = page_text
-            page_conf = 0.0
-            block_count = 0
-            for block in page.blocks:
-                page_conf += block.layout.confidence
-                block_count += 1
-            if block_count > 0:
-                page_confidences.append(page_conf / block_count)
+    # Process the PDF in <=15-page batches (Document AI online limit); keep only requested pages.
+    global_idx = 0
+    for batch in _split_pdf_to_batches(content):
+        request = documentai.ProcessRequest(
+            name=name,
+            raw_document=documentai.RawDocument(content=batch, mime_type="application/pdf"),
+        )
+        result = client.process_document(request=request, timeout=config.OCR_PAGE_TIMEOUT_S)
+        document = result.document
+        for page in document.pages:
+            if global_idx in wanted:
+                page_text = _extract_structured_page(document, page)
+                page_results[global_idx] = page_text
+                block_count = len(page.blocks)
+                if block_count > 0:
+                    page_confidences.append(
+                        sum(block.layout.confidence for block in page.blocks) / block_count
+                    )
+            global_idx += 1
 
     avg_confidence = (
         sum(page_confidences) / len(page_confidences)
