@@ -229,29 +229,47 @@ async function bootstrapProviders(queryFn: (text: string, params?: unknown[]) =>
       }
     }
 
-    // Assign OpenAI provider to EMBEDDING if not already assigned (matches stored 1536-dim vectors)
-    const openai = await queryFn(
-      `SELECT config_id, config_jsonb FROM llm_provider_config
-       WHERE provider = 'openai' AND api_base_url LIKE '%api.openai.com%' AND is_active = TRUE LIMIT 1`,
-    );
-    if (openai.rows.length > 0) {
-      const row = openai.rows[0] as { config_id: string; config_jsonb: Record<string, unknown> };
-      const useCases = (row.config_jsonb?.assigned_use_cases as string[]) || [];
-      if (!useCases.includes("EMBEDDING")) {
-        await queryFn(
-          `UPDATE llm_provider_config
-           SET config_jsonb = config_jsonb || $1::jsonb
-           WHERE config_id = $2`,
-          [
-            JSON.stringify({
-              assigned_use_cases: [...useCases, "EMBEDDING"],
-              embedding_model: "text-embedding-3-large",
-              embedding_dimensions: 1536,
-            }),
-            row.config_id,
-          ],
-        );
-        logInfo("Bootstrap: OpenAI provider assigned to EMBEDDING (1536-dim)");
+    // Assign the EMBEDDING use case to a provider driven by deployment env, so the same image can
+    // serve databases with different vector dimensions. The query-time embedding model MUST match the
+    // dimensions of the vectors stored in this deployment's DB, e.g.:
+    //   PUDA            -> EMBEDDING_PROVIDER=openai EMBEDDING_MODEL=text-embedding-3-large EMBEDDING_DIMENSIONS=1536 (defaults)
+    //   police/judicial -> EMBEDDING_PROVIDER=ollama EMBEDDING_MODEL=nomic-embed-text       EMBEDDING_DIMENSIONS=768
+    const embeddingDefaults: Record<string, { model: string; dimensions: number; clause: string }> = {
+      openai: { model: "text-embedding-3-large", dimensions: 1536, clause: "provider = 'openai' AND api_base_url LIKE '%api.openai.com%'" },
+      ollama: { model: "nomic-embed-text", dimensions: 768, clause: "provider = 'ollama'" },
+    };
+    const embeddingProvider = (process.env.EMBEDDING_PROVIDER || process.env.LLM_PROVIDER || "openai").toLowerCase();
+    const ed = embeddingDefaults[embeddingProvider];
+    if (!ed) {
+      logWarn(`Bootstrap: unknown EMBEDDING_PROVIDER '${embeddingProvider}' (expected openai|ollama), skipping EMBEDDING assignment`);
+    } else {
+      const embeddingModel = process.env.EMBEDDING_MODEL || ed.model;
+      const embeddingDimensions = Number(process.env.EMBEDDING_DIMENSIONS) || ed.dimensions;
+      // clause comes from the constant map above (not user input), keyed by a validated provider enum
+      const embProvider = await queryFn(
+        `SELECT config_id, config_jsonb FROM llm_provider_config WHERE ${ed.clause} AND is_active = TRUE LIMIT 1`,
+      );
+      if (embProvider.rows.length > 0) {
+        const row = embProvider.rows[0] as { config_id: string; config_jsonb: Record<string, unknown> };
+        const useCases = (row.config_jsonb?.assigned_use_cases as string[]) || [];
+        if (!useCases.includes("EMBEDDING")) {
+          await queryFn(
+            `UPDATE llm_provider_config
+             SET config_jsonb = config_jsonb || $1::jsonb
+             WHERE config_id = $2`,
+            [
+              JSON.stringify({
+                assigned_use_cases: [...useCases, "EMBEDDING"],
+                embedding_model: embeddingModel,
+                embedding_dimensions: embeddingDimensions,
+              }),
+              row.config_id,
+            ],
+          );
+          logInfo(`Bootstrap: ${embeddingProvider} provider assigned to EMBEDDING (${embeddingModel}, ${embeddingDimensions}-dim)`);
+        }
+      } else {
+        logWarn(`Bootstrap: no active ${embeddingProvider} provider found, EMBEDDING use case left unassigned`);
       }
     }
   } catch (err) {
