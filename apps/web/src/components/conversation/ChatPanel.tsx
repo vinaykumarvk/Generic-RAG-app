@@ -265,9 +265,16 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
   };
 
   const handleFollowUp = (question: string) => {
+    // Populate the input box (editable) and focus it — do NOT auto-send.
+    // The user can modify it, then press Enter to send (or send as-is).
     setInput(question);
-    setPendingQuestion(question);
-    queryMutation.mutate({ question });
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (ta) {
+        ta.focus();
+        ta.setSelectionRange(question.length, question.length);
+      }
+    });
   };
 
   const toggleJourney = (messageId: string) => {
