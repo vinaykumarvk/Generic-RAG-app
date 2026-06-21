@@ -166,5 +166,28 @@ describe("lexicalSearch", () => {
       expect(sqlCall[0]).toContain("d.fir_number");
       expect(sqlCall[0]).toContain("d.station_code");
     });
+
+    it("adds judgment citation, CNR, and date filters", async () => {
+      const queryFn = createMockQueryFn();
+      queryFn.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+      await lexicalSearch(queryFn, "ws-1", "NDPS Section 50", 10, {
+        citation: "2024 INSC",
+        cnr: "DLHC0100012024",
+        decision_date_from: "2024-01-01",
+        decision_date_to: "2024-12-31",
+        legal_regime: "ipc_crpc_evidence_act",
+      });
+
+      const sqlCall = queryFn.mock.calls[0];
+      expect(sqlCall[0]).toContain("LEFT JOIN judgment_metadata jm");
+      expect(sqlCall[0]).toContain("jm.neutral_citation ILIKE");
+      expect(sqlCall[0]).toContain("jm.cnr =");
+      expect(sqlCall[0]).toContain("jm.decision_date >=");
+      expect(sqlCall[0]).toContain("jm.decision_date <=");
+      expect(sqlCall[0]).toContain("jm.applicable_legal_regime");
+      expect(sqlCall[0]).toContain("jm.source_uri");
+      expect(sqlCall[0]).toContain("c.paragraph_number");
+    });
   });
 });

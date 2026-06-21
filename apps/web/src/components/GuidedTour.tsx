@@ -222,10 +222,9 @@ export function GuidedTour() {
 
   return createPortal(
     <>
-      {/* Overlay backdrop — click to dismiss */}
+      {/* Overlay backdrop */}
       <div
-        className="fixed inset-0 z-[69]"
-        onClick={completeTour}
+        className="fixed inset-0 z-[69] pointer-events-none"
         aria-hidden="true"
       />
 

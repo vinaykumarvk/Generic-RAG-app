@@ -6,6 +6,10 @@ interface Citation {
   page_number: number | null;
   excerpt: string;
   relevance_score: number;
+  source_language?: string | null;
+  target_language?: string | null;
+  translation_status?: string | null;
+  original_excerpt?: string | null;
 }
 
 interface CitationPanelProps {
@@ -37,6 +41,12 @@ export function CitationPanel({ citations, onClose }: CitationPanelProps) {
               </span>
             </div>
             <p className="text-xs text-skin-muted line-clamp-3">{c.excerpt}</p>
+            {c.source_language && c.target_language && c.source_language !== c.target_language && (
+              <p className="text-[0.68rem] text-skin-muted mt-1">
+                {c.source_language.toUpperCase()} to {c.target_language.toUpperCase()}
+                {c.translation_status ? ` (${c.translation_status})` : ""}
+              </p>
+            )}
           </div>
         ))}
       </div>

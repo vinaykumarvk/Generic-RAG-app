@@ -103,6 +103,9 @@ def normalize_document(document_id: str, workspace_id: str):
         # Extract metadata
         extracted_meta = _extract_file_metadata(local_path, mime_type)
         language = _detect_language(text)
+        extracted_meta["language"] = language
+        extracted_meta["script"] = _detect_script(text)
+        extracted_meta["text_quality_score"] = _text_quality_score(text)
 
         # FR-007: Inject page annotations into text for downstream chunker
         if page_count > 1 and "\f" in text:
@@ -180,6 +183,41 @@ def _detect_language(text: str) -> str:
         return detect(sample)
     except Exception:
         return "en"
+
+
+def _detect_script(text: str) -> str:
+    """Detect dominant script for district-court language handling."""
+    sample = text[:5000]
+    counts = {
+        "latin": 0,
+        "devanagari": 0,
+        "tamil": 0,
+        "kannada": 0,
+    }
+    for char in sample:
+        codepoint = ord(char)
+        if "A" <= char <= "Z" or "a" <= char <= "z":
+            counts["latin"] += 1
+        elif 0x0900 <= codepoint <= 0x097F:
+            counts["devanagari"] += 1
+        elif 0x0B80 <= codepoint <= 0x0BFF:
+            counts["tamil"] += 1
+        elif 0x0C80 <= codepoint <= 0x0CFF:
+            counts["kannada"] += 1
+    script, count = max(counts.items(), key=lambda item: item[1])
+    return script if count else "unknown"
+
+
+def _text_quality_score(text: str) -> float:
+    """Cheap text-layer quality score for OCR and analytics routing."""
+    stripped = text.strip()
+    if not stripped:
+        return 0.0
+    printable = sum(1 for char in stripped if char.isprintable() or char.isspace())
+    replacement_chars = stripped.count("\ufffd")
+    control_chars = sum(1 for char in stripped if ord(char) < 32 and char not in "\n\r\t\f")
+    quality = (printable - replacement_chars * 5 - control_chars * 3) / max(1, len(stripped))
+    return round(max(0.0, min(1.0, quality)), 4)
 
 
 def _strip_markdown(text: str) -> str:

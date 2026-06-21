@@ -10,6 +10,7 @@ const DocumentsPage = lazy(() => import("@/pages/DocumentsPage").then((m) => ({ 
 const QueryPage = lazy(() => import("@/pages/QueryPage").then((m) => ({ default: m.QueryPage })));
 const GraphExplorerPage = lazy(() => import("@/pages/GraphExplorerPage").then((m) => ({ default: m.GraphExplorerPage })));
 const AnalyticsPage = lazy(() => import("@/pages/AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })));
+const DistrictAnalyticsPage = lazy(() => import("@/pages/DistrictAnalyticsPage").then((m) => ({ default: m.DistrictAnalyticsPage })));
 const AdminPage = lazy(() => import("@/pages/AdminPage").then((m) => ({ default: m.AdminPage })));
 const DocumentDetailPage = lazy(() => import("@/pages/DocumentDetailPage").then((m) => ({ default: m.DocumentDetailPage })));
 const FeedbackDashboardPage = lazy(() => import("@/pages/FeedbackDashboardPage").then((m) => ({ default: m.FeedbackDashboardPage })));
@@ -52,6 +53,7 @@ export function App() {
         <Route path="/workspace/:workspaceId/query" element={<Suspense fallback={<PageLoader />}><QueryPage /></Suspense>} />
         <Route path="/workspace/:workspaceId/graph" element={<Suspense fallback={<PageLoader />}><GraphExplorerPage /></Suspense>} />
         <Route path="/workspace/:workspaceId/analytics" element={<Suspense fallback={<PageLoader />}><AnalyticsPage /></Suspense>} />
+        <Route path="/workspace/:workspaceId/district-analytics" element={<Suspense fallback={<PageLoader />}><DistrictAnalyticsPage /></Suspense>} />
         <Route path="/admin" element={<Suspense fallback={<PageLoader />}><AdminPage /></Suspense>} />
         <Route path="/admin/users" element={<Suspense fallback={<PageLoader />}><AdminPage /></Suspense>} />
         <Route path="/admin/audit" element={<Suspense fallback={<PageLoader />}><AdminPage /></Suspense>} />

@@ -2,7 +2,6 @@ import { useState, useCallback, useEffect } from "react";
 import { Outlet, useNavigate, useParams, useLocation } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
-import { GuidedTour } from "@/components/GuidedTour";
 import {
   Menu, LayoutDashboard, FileText, Search, GitFork, MoreHorizontal,
 } from "lucide-react";
@@ -141,8 +140,6 @@ export function AppLayout() {
         {/* Bottom tab bar — mobile only */}
         {isMobile && <BottomNav workspaceId={workspaceId} />}
       </div>
-
-      <GuidedTour />
     </>
   );
 }

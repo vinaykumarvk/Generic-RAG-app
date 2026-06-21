@@ -14,6 +14,8 @@ export interface RankedChunk {
   station_code?: string | null;
   matched_case_scopes?: string[];
   scope_status?: "MATCH" | "UNKNOWN";
+  chunk_metadata?: Record<string, unknown> | null;
+  chunk_legal_metadata?: Record<string, unknown> | null;
   score: number;
   sources: string[];
   score_breakdown?: {
@@ -21,6 +23,8 @@ export interface RankedChunk {
     lexical: number;
     graph: number;
     metadata: number;
+    wiki?: number;
+    graph_path?: number;
   };
 }
 
@@ -31,12 +35,24 @@ interface RerankerWeights {
   metadataWeight: number;
 }
 
+export interface RerankerFusionOptions {
+  wikiChunkIds?: Set<string>;
+  graphPathChunkIds?: Set<string>;
+  queryProfile?: string;
+}
+
+type SearchMetadataFields = {
+  chunk_metadata?: Record<string, unknown> | null;
+  chunk_legal_metadata?: Record<string, unknown> | null;
+};
+
 export function rerank(
-  vectorResults: Array<{ chunk_id: string; document_id: string; content: string; similarity: number; document_title: string; page_start: number | null; heading_path: string | null; case_reference?: string | null; fir_number?: string | null; station_code?: string | null }>,
-  lexicalResults: Array<{ chunk_id: string; document_id: string; content: string; rank: number; document_title: string; page_start: number | null; case_reference?: string | null; fir_number?: string | null; station_code?: string | null }>,
+  vectorResults: Array<{ chunk_id: string; document_id: string; content: string; similarity: number; document_title: string; page_start: number | null; heading_path: string | null; case_reference?: string | null; fir_number?: string | null; station_code?: string | null } & SearchMetadataFields>,
+  lexicalResults: Array<{ chunk_id: string; document_id: string; content: string; rank: number; document_title: string; page_start: number | null; case_reference?: string | null; fir_number?: string | null; station_code?: string | null } & SearchMetadataFields>,
   graphChunkIds: Set<string>,
   weights: RerankerWeights,
   maxChunks: number,
+  fusionOptions: RerankerFusionOptions = {},
 ): RankedChunk[] {
   const chunkMap = new Map<string, RankedChunk>();
 
@@ -47,6 +63,8 @@ export function rerank(
     if (existing) {
       existing.score += vectorScore;
       existing.sources.push("vector");
+      existing.chunk_metadata = existing.chunk_metadata ?? r.chunk_metadata ?? null;
+      existing.chunk_legal_metadata = existing.chunk_legal_metadata ?? r.chunk_legal_metadata ?? null;
       existing.score_breakdown = existing.score_breakdown || { vector: 0, lexical: 0, graph: 0, metadata: 0 };
       existing.score_breakdown.vector += vectorScore;
     } else {
@@ -60,6 +78,8 @@ export function rerank(
         case_reference: r.case_reference ?? null,
         fir_number: r.fir_number ?? null,
           station_code: r.station_code ?? null,
+          chunk_metadata: r.chunk_metadata ?? null,
+          chunk_legal_metadata: r.chunk_legal_metadata ?? null,
           score: vectorScore,
           sources: ["vector"],
           score_breakdown: {
@@ -67,6 +87,8 @@ export function rerank(
             lexical: 0,
             graph: 0,
             metadata: 0,
+            wiki: 0,
+            graph_path: 0,
           },
         });
       }
@@ -81,6 +103,8 @@ export function rerank(
     if (existing) {
       existing.score += lexicalScore;
       existing.sources.push("lexical");
+      existing.chunk_metadata = existing.chunk_metadata ?? r.chunk_metadata ?? null;
+      existing.chunk_legal_metadata = existing.chunk_legal_metadata ?? r.chunk_legal_metadata ?? null;
       existing.score_breakdown = existing.score_breakdown || { vector: 0, lexical: 0, graph: 0, metadata: 0 };
       existing.score_breakdown.lexical += lexicalScore;
     } else {
@@ -94,6 +118,8 @@ export function rerank(
         case_reference: r.case_reference ?? null,
         fir_number: r.fir_number ?? null,
         station_code: r.station_code ?? null,
+        chunk_metadata: r.chunk_metadata ?? null,
+        chunk_legal_metadata: r.chunk_legal_metadata ?? null,
         score: lexicalScore,
         sources: ["lexical"],
         score_breakdown: {
@@ -101,18 +127,33 @@ export function rerank(
           lexical: lexicalScore,
           graph: 0,
           metadata: 0,
+          wiki: 0,
+          graph_path: 0,
         },
       });
     }
   }
 
   // Graph boost: chunks referenced by graph entities get a boost
+  const profileBoost = getProfileBoosts(fusionOptions.queryProfile);
   for (const [chunkId, chunk] of chunkMap) {
     if (graphChunkIds.has(chunkId)) {
       chunk.score += weights.graphWeight;
       chunk.sources.push("graph");
       chunk.score_breakdown = chunk.score_breakdown || { vector: 0, lexical: 0, graph: 0, metadata: 0 };
       chunk.score_breakdown.graph += weights.graphWeight;
+    }
+    if (fusionOptions.graphPathChunkIds?.has(chunkId)) {
+      chunk.score += profileBoost.graphPath;
+      chunk.sources.push("graph_path");
+      chunk.score_breakdown = chunk.score_breakdown || { vector: 0, lexical: 0, graph: 0, metadata: 0 };
+      chunk.score_breakdown.graph_path = (chunk.score_breakdown.graph_path || 0) + profileBoost.graphPath;
+    }
+    if (fusionOptions.wikiChunkIds?.has(chunkId)) {
+      chunk.score += profileBoost.wiki;
+      chunk.sources.push("wiki");
+      chunk.score_breakdown = chunk.score_breakdown || { vector: 0, lexical: 0, graph: 0, metadata: 0 };
+      chunk.score_breakdown.wiki = (chunk.score_breakdown.wiki || 0) + profileBoost.wiki;
     }
   }
 
@@ -124,4 +165,22 @@ export function rerank(
     }))
     .sort((a, b) => b.score - a.score)
     .slice(0, maxChunks);
+}
+
+function getProfileBoosts(queryProfile?: string): { wiki: number; graphPath: number } {
+  switch (queryProfile) {
+    case "doctrine":
+      return { wiki: 0.18, graphPath: 0.12 };
+    case "officer_lesson":
+      return { wiki: 0.22, graphPath: 0.12 };
+    case "precedent_trace":
+      return { wiki: 0.12, graphPath: 0.2 };
+    case "pattern_analysis":
+      return { wiki: 0.12, graphPath: 0.16 };
+    case "comparison":
+      return { wiki: 0.1, graphPath: 0.14 };
+    case "case_specific":
+    default:
+      return { wiki: 0.08, graphPath: 0.08 };
+  }
 }

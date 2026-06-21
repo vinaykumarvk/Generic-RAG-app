@@ -299,6 +299,51 @@ describe("generateAnswer", () => {
       expect(callArgs.messages[0].content).toContain('Prefer chunks labeled "Scope match"');
     });
 
+    it("includes bilingual translation metadata in prompts and citations", async () => {
+      const llmProvider = createMockLlmProvider();
+      llmProvider.llmComplete.mockResolvedValueOnce({
+        content: "The translated order supports the point [1].",
+        provider: "openai",
+        model: "gpt-4o",
+        latencyMs: 100,
+        fallbackUsed: false,
+      });
+
+      const result = await generateAnswer(
+        llmProvider,
+        "What does the order say?",
+        [makeRankedChunk({
+          chunk_id: "c1",
+          document_title: "UP District Order",
+          content: "The bail application is rejected.",
+          chunk_metadata: {
+            translation: {
+              source_language: "hi",
+              target_language: "en",
+              qa_status: "pending",
+              provider: "fake",
+            },
+          },
+          chunk_legal_metadata: {
+            source_language: "hi",
+            target_language: "en",
+            translation_status: "pending",
+          },
+        })],
+        "",
+        [],
+      );
+
+      const callArgs = llmProvider.llmComplete.mock.calls[0][0];
+      const userMessage = callArgs.messages.find((m: { role: string }) => m.role === "user");
+      expect(userMessage.content).toContain("Translated hi to en");
+      expect(userMessage.content).toContain("Translation pending");
+      expect(result!.citations[0].source_language).toBe("hi");
+      expect(result!.citations[0].target_language).toBe("en");
+      expect(result!.citations[0].translation_status).toBe("pending");
+      expect(result!.citations[0].translated_excerpt).toContain("bail application");
+    });
+
     it("treats multi-case comparison questions as scoped comparisons", async () => {
       const llmProvider = createMockLlmProvider();
       llmProvider.llmComplete.mockResolvedValueOnce({

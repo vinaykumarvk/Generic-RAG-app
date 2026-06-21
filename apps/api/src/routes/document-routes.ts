@@ -11,6 +11,27 @@ import { invalidateCache, invalidateCacheForDocument } from "../retrieval/cache"
 import crypto from "node:crypto";
 import path from "node:path";
 
+const AWS_IMPORT_MAX_FILE_BYTES = Number(process.env.AWS_IMPORT_MAX_FILE_BYTES || 100 * 1024 * 1024);
+const AWS_JUDGMENT_REPOSITORIES = {
+  supreme_court: {
+    bucket: "indian-supreme-court-judgments",
+    label: "Indian Supreme Court Judgments",
+  },
+  high_court: {
+    bucket: "indian-high-court-judgments",
+    label: "Indian High Court Judgments",
+  },
+} as const;
+
+type AwsJudgmentRepository = keyof typeof AWS_JUDGMENT_REPOSITORIES;
+type AwsImportOptionKind = "years" | "courts" | "benches" | "files";
+
+interface S3ListResult {
+  commonPrefixes: string[];
+  contents: Array<{ key: string; size: number; lastModified: string | null }>;
+  isTruncated: boolean;
+}
+
 export interface DocumentRouteDeps {
   queryFn: QueryFn;
   getClient: GetClientFn;
@@ -51,6 +72,145 @@ function getRequestUserId(authUser: { userId?: string; user_id?: string } | unde
   if (typeof authUser?.userId === "string") return authUser.userId;
   if (typeof authUser?.user_id === "string") return authUser.user_id;
   return undefined;
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function encodeS3Key(key: string): string {
+  return key.split("/").map((part) => encodeURIComponent(part)).join("/");
+}
+
+function normalizeAwsKey(repository: AwsJudgmentRepository, rawKey: string): string {
+  const repo = AWS_JUDGMENT_REPOSITORIES[repository];
+  let key = rawKey.trim();
+  key = key.replace(/^https:\/\/[^/]+\.s3(?:[.-][^/]+)?\.amazonaws\.com\//, "");
+  key = key.replace(/^s3:\/\/[^/]+\//, "");
+  key = key.replace(new RegExp(`^${repo.bucket}/`), "");
+  key = key.replace(/^\/+/, "");
+
+  if (!key || key.includes("..") || key.includes("?") || key.includes("#")) {
+    throw new Error("Invalid S3 object key");
+  }
+  if (!key.startsWith("data/")) {
+    throw new Error("Only AWS Open Data judgment objects under data/ are supported");
+  }
+  if (!key.toLowerCase().endsWith(".pdf")) {
+    throw new Error("Only individual PDF judgment files can be imported. Tar and metadata files are not processed by this pipeline.");
+  }
+  return key;
+}
+
+function parseAwsKeyMetadata(key: string): Record<string, string | number> {
+  const metadata: Record<string, string | number> = {};
+  const yearMatch = key.match(/(?:^|\/)year=(\d{4})(?:\/|$)/);
+  const courtMatch = key.match(/(?:^|\/)court=([^/]+)(?:\/|$)/);
+  if (yearMatch) metadata.year = Number(yearMatch[1]);
+  if (courtMatch) metadata.court_code = decodeURIComponent(courtMatch[1]);
+  return metadata;
+}
+
+function parseJsonObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function resolveDocumentMimeType(fileName: string, contentType: string | null): string {
+  if (contentType?.split(";")[0]?.trim() === "application/pdf") return "application/pdf";
+  if (fileName.toLowerCase().endsWith(".pdf")) return "application/pdf";
+  return contentType?.split(";")[0]?.trim() || "application/octet-stream";
+}
+
+function decodeXml(value: string): string {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&apos;/g, "'");
+}
+
+function readXmlTag(block: string, tag: string): string | null {
+  const match = block.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`));
+  return match ? decodeXml(match[1]) : null;
+}
+
+function readXmlBlocks(xml: string, tag: string): string[] {
+  const blocks: string[] = [];
+  const regex = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, "g");
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(xml)) !== null) {
+    blocks.push(match[1]);
+  }
+  return blocks;
+}
+
+function parseS3ListXml(xml: string): S3ListResult {
+  const commonPrefixes = readXmlBlocks(xml, "CommonPrefixes")
+    .map((block) => readXmlTag(block, "Prefix"))
+    .filter((prefix): prefix is string => Boolean(prefix));
+
+  const contents = readXmlBlocks(xml, "Contents")
+    .map((block) => ({
+      key: readXmlTag(block, "Key") || "",
+      size: Number(readXmlTag(block, "Size") || "0"),
+      lastModified: readXmlTag(block, "LastModified"),
+    }))
+    .filter((item) => item.key);
+
+  return {
+    commonPrefixes,
+    contents,
+    isTruncated: readXmlTag(xml, "IsTruncated") === "true",
+  };
+}
+
+async function fetchS3List(
+  repository: AwsJudgmentRepository,
+  prefix: string,
+  maxKeys: number,
+  delimiter = "/",
+): Promise<S3ListResult> {
+  const repo = AWS_JUDGMENT_REPOSITORIES[repository];
+  const url = new URL(`https://${repo.bucket}.s3.amazonaws.com/`);
+  url.searchParams.set("list-type", "2");
+  url.searchParams.set("prefix", prefix);
+  url.searchParams.set("max-keys", String(maxKeys));
+  if (delimiter) url.searchParams.set("delimiter", delimiter);
+
+  const response = await fetch(url.toString(), { signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) {
+    throw new Error(`AWS listing failed (${response.status})`);
+  }
+  return parseS3ListXml(await response.text());
+}
+
+function stripPrefixSegment(fullPrefix: string, basePrefix: string, marker: string): string {
+  return fullPrefix
+    .slice(basePrefix.length)
+    .replace(/\/$/, "")
+    .replace(new RegExp(`^${marker}=`), "");
+}
+
+function validateAwsOptionQuery(kind: AwsImportOptionKind, query: Record<string, string | undefined>) {
+  if ((kind === "courts" || kind === "benches" || kind === "files") && !/^\d{4}$/.test(query.year || "")) {
+    throw new Error("year is required");
+  }
+  if ((kind === "benches" || kind === "files") && !/^[A-Za-z0-9_-]+$/.test(query.court || "")) {
+    throw new Error("court is required");
+  }
+  if (kind === "files" && !/^[A-Za-z0-9_.-]+$/.test(query.bench || "")) {
+    throw new Error("bench is required");
+  }
+}
+
+function getAwsBrowsePrefix(kind: AwsImportOptionKind, query: Record<string, string | undefined>): string {
+  if (kind === "years") return "data/pdf/";
+  if (kind === "courts") return `data/pdf/year=${query.year}/`;
+  if (kind === "benches") return `data/pdf/year=${query.year}/court=${query.court}/`;
+  const filePrefix = (query.file_prefix || "").replace(/[/?#]/g, "");
+  return `data/pdf/year=${query.year}/court=${query.court}/bench=${query.bench}/${filePrefix}`;
 }
 
 async function clearRetryDerivedState(
@@ -129,7 +289,14 @@ export function createDocumentRoutes(app: FastifyInstance, deps: DocumentRouteDe
       const result = await queryFn(
         `SELECT d.*,
                 (SELECT count(*) FROM chunk c WHERE c.document_id = d.document_id) as actual_chunk_count,
-                (SELECT json_agg(json_build_object('step', j.step, 'status', j.status, 'progress', j.progress)
+                (SELECT json_agg(json_build_object(
+                                   'step', j.step,
+                                   'status', j.status,
+                                   'progress', j.progress,
+                                   'failure_category', j.failure_category,
+                                   'locked_until', j.locked_until,
+                                   'dead_lettered_at', j.dead_lettered_at
+                                 )
                                  ORDER BY j.created_at, j.job_id)
                  FROM ingestion_job j
                  WHERE j.document_id = d.document_id) as jobs
@@ -248,6 +415,263 @@ export function createDocumentRoutes(app: FastifyInstance, deps: DocumentRouteDe
       ]);
 
       return { nodes: nodesResult.rows, edges: edgesResult.rows };
+    }
+  );
+
+  // Browse public AWS Open Data judgment PDF keys for dropdown-based import.
+  app.get<{
+    Params: { wid: string };
+    Querystring: {
+      repository?: AwsJudgmentRepository;
+      kind?: AwsImportOptionKind;
+      year?: string;
+      court?: string;
+      bench?: string;
+      file_prefix?: string;
+      max_keys?: string;
+    };
+  }>(
+    "/api/v1/workspaces/:wid/documents/aws-import/options",
+    async (request, reply) => {
+      const { wid } = request.params;
+      if (!isUuid(wid)) return send400(reply, "Invalid workspace id");
+
+      const workspace = await queryFn(
+        "SELECT settings FROM workspace WHERE workspace_id = $1 AND status != 'SUSPENDED'",
+        [wid]
+      );
+      if (workspace.rows.length === 0) return send404(reply, "Workspace not found");
+
+      const settings = parseJsonObject(workspace.rows[0].settings);
+      if (settings.workspaceKind !== "judgments") {
+        return send400(reply, "AWS judgment import is available only for judgment workspaces");
+      }
+
+      const repository = request.query.repository || "high_court";
+      if (!(repository in AWS_JUDGMENT_REPOSITORIES)) {
+        return send400(reply, "repository must be supreme_court or high_court");
+      }
+      if (repository !== "high_court") {
+        return send400(reply, "Dropdown browsing is available for the High Court PDF repository");
+      }
+
+      const kind = request.query.kind || "years";
+      if (!["years", "courts", "benches", "files"].includes(kind)) {
+        return send400(reply, "kind must be years, courts, benches, or files");
+      }
+
+      try {
+        validateAwsOptionQuery(kind, request.query);
+      } catch (err) {
+        return send400(reply, err instanceof Error ? err.message : "Invalid AWS option query");
+      }
+
+      const maxKeys = Math.min(1000, Math.max(1, parseInt(request.query.max_keys || "500", 10)));
+      const prefix = getAwsBrowsePrefix(kind, request.query);
+      const s3Result = await fetchS3List(repository, prefix, maxKeys);
+
+      let options: Array<{ value: string; label: string; size?: number; last_modified?: string | null }>;
+      if (kind === "years") {
+        options = s3Result.commonPrefixes
+          .map((item) => stripPrefixSegment(item, prefix, "year"))
+          .filter(Boolean)
+          .sort((left, right) => Number(right) - Number(left))
+          .map((year) => ({ value: year, label: year }));
+      } else if (kind === "courts") {
+        options = s3Result.commonPrefixes
+          .map((item) => stripPrefixSegment(item, prefix, "court"))
+          .filter(Boolean)
+          .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }))
+          .map((court) => ({ value: court, label: court }));
+      } else if (kind === "benches") {
+        options = s3Result.commonPrefixes
+          .map((item) => stripPrefixSegment(item, prefix, "bench"))
+          .filter(Boolean)
+          .sort((left, right) => left.localeCompare(right))
+          .map((bench) => ({ value: bench, label: bench }));
+      } else {
+        options = s3Result.contents
+          .filter((item) => item.key.toLowerCase().endsWith(".pdf"))
+          .map((item) => ({
+            value: item.key,
+            label: path.basename(item.key),
+            size: item.size,
+            last_modified: item.lastModified,
+          }));
+      }
+
+      return {
+        repository,
+        kind,
+        prefix,
+        options,
+        truncated: s3Result.isTruncated,
+      };
+    }
+  );
+
+  // Import a public AWS Open Data judgment PDF and enqueue the normal ingestion pipeline.
+  app.post<{ Params: { wid: string } }>(
+    "/api/v1/workspaces/:wid/documents/aws-import",
+    async (request, reply) => {
+      const { wid } = request.params;
+      if (!isUuid(wid)) return send400(reply, "Invalid workspace id");
+
+      const body = request.body as {
+        repository?: AwsJudgmentRepository;
+        key?: string;
+        title?: string;
+        category?: string;
+        subcategory?: string;
+        metadata?: Record<string, unknown>;
+        sensitivity_level?: string;
+        force?: boolean;
+      };
+
+      const workspace = await queryFn(
+        "SELECT settings FROM workspace WHERE workspace_id = $1 AND status != 'SUSPENDED'",
+        [wid]
+      );
+      if (workspace.rows.length === 0) return send404(reply, "Workspace not found");
+
+      const settings = parseJsonObject(workspace.rows[0].settings);
+      if (settings.workspaceKind !== "judgments") {
+        return send400(reply, "AWS judgment import is available only for judgment workspaces");
+      }
+
+      const repository = body.repository;
+      if (!repository || !(repository in AWS_JUDGMENT_REPOSITORIES)) {
+        return send400(reply, "repository must be supreme_court or high_court");
+      }
+      if (!body.key) return send400(reply, "S3 object key is required");
+
+      let key: string;
+      try {
+        key = normalizeAwsKey(repository, body.key);
+      } catch (err) {
+        return send400(reply, err instanceof Error ? err.message : "Invalid S3 object key");
+      }
+
+      const repo = AWS_JUDGMENT_REPOSITORIES[repository];
+      const url = `https://${repo.bucket}.s3.amazonaws.com/${encodeS3Key(key)}`;
+      const response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+      if (!response.ok) {
+        return send400(reply, `AWS object download failed (${response.status})`);
+      }
+
+      const contentLength = Number(response.headers.get("content-length") || "0");
+      if (contentLength > AWS_IMPORT_MAX_FILE_BYTES) {
+        return send400(reply, `AWS object is too large (${contentLength} bytes, max ${AWS_IMPORT_MAX_FILE_BYTES})`);
+      }
+
+      const fileData = Buffer.from(await response.arrayBuffer());
+      if (fileData.length === 0) {
+        reply.code(422);
+        return { error: "AWS object is empty", error_code: "ZERO_BYTE_FILE" };
+      }
+      if (fileData.length > AWS_IMPORT_MAX_FILE_BYTES) {
+        return send400(reply, `AWS object is too large (${fileData.length} bytes, max ${AWS_IMPORT_MAX_FILE_BYTES})`);
+      }
+
+      const fileName = sanitizeFilename(path.basename(key));
+      const mimeType = resolveDocumentMimeType(fileName, response.headers.get("content-type"));
+      if (mimeType !== "application/pdf") {
+        return send400(reply, `Unsupported AWS object type: ${mimeType}. Only PDF judgments are supported.`);
+      }
+
+      const sha256 = crypto.createHash("sha256").update(fileData).digest("hex");
+      const existing = await queryFn(
+        `SELECT document_id, status
+         FROM document
+         WHERE workspace_id = $1 AND sha256 = $2 AND status != 'DELETED'
+         ORDER BY updated_at DESC`,
+        [wid, sha256]
+      );
+      const blockingExisting = existing.rows.find((row: { status: string }) => row.status !== "FAILED") as
+        | { document_id: string; status: string }
+        | undefined;
+      if (blockingExisting && !body.force) {
+        reply.code(409);
+        return { error: "Duplicate document detected", existing_document_id: blockingExisting.document_id };
+      }
+
+      const docId = crypto.randomUUID();
+      const stored = await storageProvider.upload(wid, docId, fileName, fileData);
+      const authUserId = getRequestUserId(request.authUser as { userId?: string; user_id?: string } | undefined);
+      const sourcePath = `s3://${repo.bucket}/${key}`;
+      const metadata = {
+        ...parseAwsKeyMetadata(key),
+        ...parseJsonObject(body.metadata),
+        source: "aws_open_data",
+        aws_repository: repository,
+        aws_repository_label: repo.label,
+        aws_bucket: repo.bucket,
+        aws_key: key,
+        aws_url: url,
+        license: "CC BY 4.0",
+      };
+      const validSensitivity = ["PUBLIC", "INTERNAL", "RESTRICTED", "SEALED"].includes(body.sensitivity_level || "")
+        ? body.sensitivity_level : "PUBLIC";
+
+      const result = await queryFn(
+        `INSERT INTO document (document_id, workspace_id, title, file_name, mime_type, file_size_bytes, file_path, sha256,
+         category, subcategory, source_path, metadata, custom_tags, gcs_uri, uploaded_by,
+         sensitivity_level, language)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+         RETURNING *`,
+        [
+          docId,
+          wid,
+          body.title?.trim() || fileName,
+          fileName,
+          mimeType,
+          fileData.length,
+          stored.filePath,
+          sha256,
+          body.category || "judgment",
+          body.subcategory || repo.label,
+          sourcePath,
+          JSON.stringify(metadata),
+          ["aws-open-data", repository],
+          stored.gcsUri || null,
+          authUserId,
+          validSensitivity,
+          "english",
+        ]
+      );
+
+      await queryFn(
+        `INSERT INTO ingestion_job (document_id, workspace_id, step, status, metadata)
+         VALUES ($1, $2, 'VALIDATE', 'PENDING', $3)`,
+        [docId, wid, JSON.stringify({ source: "aws_open_data", aws_repository: repository, aws_key: key })]
+      );
+
+      await queryFn(
+        `INSERT INTO audit_log (user_id, action, resource_type, resource_id, workspace_id, details)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          authUserId,
+          "document.aws_import",
+          "document",
+          docId,
+          wid,
+          JSON.stringify({ repository, bucket: repo.bucket, key, file_name: fileName, file_size: fileData.length }),
+        ]
+      );
+
+      await invalidateCache({ queryFn }, wid);
+
+      reply.code(201);
+      return {
+        document: result.rows[0],
+        import: {
+          repository,
+          bucket: repo.bucket,
+          key,
+          source_path: sourcePath,
+          file_size_bytes: fileData.length,
+        },
+      };
     }
   );
 
@@ -475,10 +899,12 @@ export function createDocumentRoutes(app: FastifyInstance, deps: DocumentRouteDe
           await client.query(
             `UPDATE ingestion_job
              SET status = 'FAILED',
+                 failure_category = 'superseded',
+                 locked_until = NULL,
                  error_message = COALESCE(error_message, 'Superseded by upload retry'),
                  completed_at = COALESCE(completed_at, now()),
                  updated_at = now()
-             WHERE document_id = $1 AND status IN ('PENDING', 'RETRYING', 'PROCESSING')`,
+             WHERE document_id = $1 AND status IN ('PENDING', 'RETRYING', 'PROCESSING', 'DEAD_LETTER')`,
             [recoveredDocId]
           );
 
@@ -628,7 +1054,13 @@ export function createDocumentRoutes(app: FastifyInstance, deps: DocumentRouteDe
           [id]
         );
         await client.query(
-          "UPDATE ingestion_job SET status = 'FAILED' WHERE document_id = $1 AND status IN ('PENDING', 'RETRYING')",
+          `UPDATE ingestion_job
+           SET status = 'FAILED',
+               failure_category = 'manual_reprocess',
+               locked_until = NULL,
+               updated_at = now()
+           WHERE document_id = $1
+             AND status IN ('PENDING', 'RETRYING', 'PROCESSING', 'DEAD_LETTER')`,
           [id]
         );
         await client.query(

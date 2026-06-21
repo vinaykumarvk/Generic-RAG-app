@@ -185,6 +185,72 @@ describe("vectorSearch", () => {
       expect(sqlCall[0]).toContain("d.fir_number");
       expect(sqlCall[0]).toContain("d.station_code");
     });
+
+    it("adds judgment hard filters and returns judgment citation fields", async () => {
+      const queryFn = createMockQueryFn();
+      const llmProvider = createMockLlmProvider();
+
+      queryFn.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+      await vectorSearch(
+        { queryFn, llmProvider },
+        "ws-1",
+        "section 50 search",
+        10,
+        {
+          court_code: "SCI",
+          year: 2024,
+          statute: "NDPS",
+          section: "50",
+          outcome: "conviction_set_aside",
+          judgmentId: "sci:2024:ndps-50",
+        }
+      );
+
+      const sqlCall = queryFn.mock.calls[0];
+      expect(sqlCall[0]).toContain("LEFT JOIN judgment_metadata jm");
+      expect(sqlCall[0]).toContain("jm.canonical_judgment_id = ANY($4)");
+      expect(sqlCall[0]).toContain("LOWER(COALESCE(jm.court_code");
+      expect(sqlCall[0]).toContain("jm.judgment_year = ANY");
+      expect(sqlCall[0]).toContain("judgment_statute_section jss");
+      expect(sqlCall[0]).toContain("judgment_outcome jo");
+      expect(sqlCall[0]).toContain("jm.neutral_citation");
+      expect(sqlCall[0]).toContain("c.paragraph_number");
+      expect(sqlCall[1][3]).toEqual(["sci:2024:ndps-50"]);
+    });
+
+    it("adds district court metadata filters for translated commercial-safe chunks", async () => {
+      const queryFn = createMockQueryFn();
+      const llmProvider = createMockLlmProvider();
+
+      queryFn.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+
+      await vectorSearch(
+        { queryFn, llmProvider },
+        "ws-1",
+        "district POCSO text coverage",
+        10,
+        {
+          state_code: 9,
+          district_code: 101,
+          court_level: "district",
+          source_name: "ddl",
+          source_language: "hi",
+          translation_status: "approved",
+          commercial_safe: true,
+        }
+      );
+
+      const sqlCall = queryFn.mock.calls[0];
+      expect(sqlCall[0]).toContain("c.legal_metadata->>'state_code'");
+      expect(sqlCall[0]).toContain("c.legal_metadata->>'district_code'");
+      expect(sqlCall[0]).toContain("c.legal_metadata->>'court_level'");
+      expect(sqlCall[0]).toContain("c.legal_metadata->>'source_name'");
+      expect(sqlCall[0]).toContain("c.legal_metadata->>'commercial_safe'");
+      expect(sqlCall[0]).toContain("c.legal_metadata->>'translation_status'");
+      expect(sqlCall[0]).toContain("district_state_code");
+      expect(sqlCall[0]).toContain("district_source_name");
+    });
   });
 
   describe("Returns empty array when no chunks match", () => {

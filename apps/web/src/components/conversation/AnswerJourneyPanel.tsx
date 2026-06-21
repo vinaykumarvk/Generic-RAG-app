@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  BookOpen,
   Clock,
   Database,
   GitBranch,
@@ -16,6 +17,11 @@ interface Citation {
   page_number: number | null;
   excerpt: string;
   relevance_score: number;
+  source_language?: string | null;
+  target_language?: string | null;
+  translation_status?: string | null;
+  translated_excerpt?: string | null;
+  original_excerpt?: string | null;
 }
 
 interface JourneyStep {
@@ -288,6 +294,30 @@ function renderStepBody(step: JourneyStep, trace: JourneyTrace): ReactNode {
         </div>
       );
 
+    case "query_planning":
+      return (
+        <div className="space-y-4">
+          <Section title="Selected profile">
+            <JsonInline value={step.summary || {}} emptyLabel="No query plan." />
+          </Section>
+          <Section title="Effective filters">
+            <JsonInline value={payload.effective_filters || {}} emptyLabel="No filters." />
+          </Section>
+        </div>
+      );
+
+    case "wiki_selection":
+      return (
+        <div className="space-y-4">
+          <Section title="Selected wiki articles">
+            <WikiArticleList items={asObjectArray(payload.articles)} />
+          </Section>
+          <Section title="Source chunks from wiki">
+            <StringList items={asStringArray(payload.source_chunk_ids)} emptyLabel="No wiki source chunks." />
+          </Section>
+        </div>
+      );
+
     case "vector_search":
       return (
         <Section title="Per-query vector candidates">
@@ -311,10 +341,28 @@ function renderStepBody(step: JourneyStep, trace: JourneyTrace): ReactNode {
           <Section title="Discovered edges">
             <GraphEdgeList items={asObjectArray(payload.edges)} />
           </Section>
+          <Section title="Graph paths">
+            <GraphPathList items={asObjectArray(payload.paths)} />
+          </Section>
+          <Section title="Graph assertions">
+            <GraphAssertionList items={asObjectArray(payload.assertions)} />
+          </Section>
           <Section title="Graph context">
             <pre className="whitespace-pre-wrap text-xs text-text-secondary bg-surface-alt rounded-lg p-3 border border-skin">
               {stringOrFallback(payload.context_text)}
             </pre>
+          </Section>
+        </div>
+      );
+
+    case "graph_path_extraction":
+      return (
+        <div className="space-y-4">
+          <Section title="Graph paths used">
+            <GraphPathList items={asObjectArray(payload.paths)} />
+          </Section>
+          <Section title="Assertions used">
+            <GraphAssertionList items={asObjectArray(payload.assertions)} />
           </Section>
         </div>
       );
@@ -324,6 +372,24 @@ function renderStepBody(step: JourneyStep, trace: JourneyTrace): ReactNode {
         <Section title="Ranked chunks">
           <CandidateList items={asObjectArray(payload.ranked_chunks)} />
         </Section>
+      );
+
+    case "evidence_fusion":
+      return (
+        <div className="space-y-4">
+          <Section title="Fusion summary">
+            <JsonInline value={step.summary || {}} emptyLabel="No fusion summary." />
+          </Section>
+          <Section title="Wiki contribution">
+            <WikiArticleList items={asObjectArray(payload.wiki_articles)} />
+          </Section>
+          <Section title="Graph paths">
+            <GraphPathList items={asObjectArray(payload.graph_paths)} />
+          </Section>
+          <Section title="Fused chunks">
+            <CandidateList items={asObjectArray(payload.fused_chunks)} />
+          </Section>
+        </div>
       );
 
     case "access_filter":
@@ -531,6 +597,100 @@ function CandidateList({
       ))}
     </div>
   );
+}
+
+function WikiArticleList({ items }: { items: Array<Record<string, unknown>> }) {
+  if (items.length === 0) {
+    return <p className="text-sm text-text-secondary">No wiki articles were selected.</p>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {items.map((item, index) => (
+        <div key={`${item.article_id || item.slug || index}`} className="rounded-lg border border-skin bg-surface-alt p-3 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <BookOpen size={13} className="text-primary-600" aria-hidden="true" />
+            <span className="text-sm font-medium text-text-primary">{stringOrFallback(item.title)}</span>
+            <StatusPill value={item.review_status} />
+            {typeof item.citation_coverage === "number" && (
+              <span className="text-xs rounded-full bg-surface px-2 py-0.5 text-text-secondary">
+                citations {Math.round(item.citation_coverage * 100)}%
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {asStringArray(item.statutes).map((tag) => <Tag key={`statute-${tag}`} value={tag} />)}
+            {asStringArray(item.sections).map((tag) => <Tag key={`section-${tag}`} value={`Sec ${tag}`} />)}
+            {asStringArray(item.issue_tags).map((tag) => <Tag key={`issue-${tag}`} value={tag} />)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function GraphPathList({ items }: { items: Array<Record<string, unknown>> }) {
+  if (items.length === 0) {
+    return <p className="text-sm text-text-secondary">No graph paths were used.</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {items.map((item, index) => (
+        <div key={`${item.source}-${item.target}-${index}`} className="rounded-lg border border-skin bg-surface-alt px-3 py-2 text-sm text-text-primary space-y-1">
+          <div>
+            <span className="font-medium">{stringOrFallback(item.source_name)}</span>
+            {" "}
+            <span className="text-text-secondary">[{stringOrFallback(item.edge_type)}]</span>
+            {" "}
+            <span className="font-medium">{stringOrFallback(item.target_name)}</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <StatusPill value={item.review_status} />
+            {item.confidence != null && <Tag value={`confidence ${formatNumeric(item.confidence)}`} />}
+            {item.evidence_chunk_id != null && <Tag value="source chunk linked" />}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function GraphAssertionList({ items }: { items: Array<Record<string, unknown>> }) {
+  if (items.length === 0) {
+    return <p className="text-sm text-text-secondary">No graph assertions were used.</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {items.map((item, index) => (
+        <div key={`${item.assertion_id || index}`} className="rounded-lg border border-skin bg-surface-alt px-3 py-2 text-sm text-text-primary">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">{stringOrFallback(item.assertion_type)}</span>
+            <span className="text-text-secondary">{stringOrFallback(item.predicate)}</span>
+            <StatusPill value={item.review_status} />
+          </div>
+          {item.object_value != null && (
+            <p className="mt-1 text-sm text-text-secondary">{String(item.object_value)}</p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatusPill({ value }: { value: unknown }) {
+  const text = stringOrFallback(value, "unknown");
+  const style = text === "approved"
+    ? "bg-success/10 text-success"
+    : text.includes("review")
+      ? "surface-warning-soft text-warning"
+      : "bg-surface text-text-secondary";
+  return <span className={`text-xs rounded-full px-2 py-0.5 ${style}`}>{text.replace(/_/g, " ")}</span>;
+}
+
+function Tag({ value }: { value: string }) {
+  return <span className="text-xs rounded-full border border-skin bg-surface px-2 py-0.5 text-text-secondary">{value}</span>;
 }
 
 function QueryResultGroups({ groups }: { groups: Array<Record<string, unknown>> }) {

@@ -33,20 +33,16 @@ function createMockReply() {
 
 function createMockApp() {
   const routes: MockRouteHandler[] = [];
+  const registerRoute = (method: string, path: string, optionsOrHandler: any, maybeHandler?: any) => {
+    const handler = typeof maybeHandler === "function" ? maybeHandler : optionsOrHandler;
+    routes.push({ method, path, handler });
+  };
 
   return {
-    get: vi.fn((path: string, handler: any) => {
-      routes.push({ method: "GET", path, handler });
-    }),
-    post: vi.fn((path: string, handler: any) => {
-      routes.push({ method: "POST", path, handler });
-    }),
-    delete: vi.fn((path: string, handler: any) => {
-      routes.push({ method: "DELETE", path, handler });
-    }),
-    patch: vi.fn((path: string, handler: any) => {
-      routes.push({ method: "PATCH", path, handler });
-    }),
+    get: vi.fn((path: string, optionsOrHandler: any, maybeHandler?: any) => registerRoute("GET", path, optionsOrHandler, maybeHandler)),
+    post: vi.fn((path: string, optionsOrHandler: any, maybeHandler?: any) => registerRoute("POST", path, optionsOrHandler, maybeHandler)),
+    delete: vi.fn((path: string, optionsOrHandler: any, maybeHandler?: any) => registerRoute("DELETE", path, optionsOrHandler, maybeHandler)),
+    patch: vi.fn((path: string, optionsOrHandler: any, maybeHandler?: any) => registerRoute("PATCH", path, optionsOrHandler, maybeHandler)),
     _routes: routes,
     findRoute(method: string, path: string) {
       return routes.find((r) => r.method === method && r.path === path);
@@ -107,6 +103,7 @@ describe("document-routes", () => {
       upload: vi.fn().mockResolvedValue({ filePath: "/uploads/test-file", gcsUri: null }),
       download: vi.fn(), delete: vi.fn(), getSignedUrl: vi.fn(),
     };
+    vi.stubGlobal("fetch", vi.fn());
     createDocumentRoutes(app as any, { queryFn, getClient, llmProvider, storageProvider });
   });
 
@@ -216,6 +213,113 @@ describe("document-routes", () => {
       );
       expect(ingestionCall).toBeDefined();
       expect(ingestionCall![1][1]).toBe("ws-1");
+    });
+  });
+
+  describe("AWS Open Data import", () => {
+    it("lists High Court years for dropdown browsing", async () => {
+      const route = app.findRoute("GET", "/api/v1/workspaces/:wid/documents/aws-import/options");
+      expect(route).toBeDefined();
+
+      vi.mocked(globalThis.fetch).mockResolvedValueOnce({
+        ok: true,
+        text: vi.fn().mockResolvedValue(`
+          <ListBucketResult>
+            <CommonPrefixes><Prefix>data/pdf/year=2023/</Prefix></CommonPrefixes>
+            <CommonPrefixes><Prefix>data/pdf/year=2024/</Prefix></CommonPrefixes>
+            <IsTruncated>false</IsTruncated>
+          </ListBucketResult>
+        `),
+      } as any);
+      queryFn.mockResolvedValueOnce({ rows: [{ settings: { workspaceKind: "judgments" } }], rowCount: 1 });
+
+      const result = await route!.handler({
+        params: { wid: "183174b5-9ee5-4812-9a8d-665f020fde91" },
+        query: { repository: "high_court", kind: "years" },
+        authUser: { userId: "admin-1" },
+      }, createMockReply());
+
+      expect(result.options).toEqual([
+        { value: "2024", label: "2024" },
+        { value: "2023", label: "2023" },
+      ]);
+      expect(result.truncated).toBe(false);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        expect.stringContaining("indian-high-court-judgments.s3.amazonaws.com"),
+        expect.any(Object)
+      );
+    });
+
+    it("downloads a judgment PDF and queues ingestion", async () => {
+      const route = app.findRoute("POST", "/api/v1/workspaces/:wid/documents/aws-import");
+      expect(route).toBeDefined();
+
+      const fileBuffer = Buffer.from("%PDF-1.7 court judgment");
+      const arrayBuffer = fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength);
+      vi.mocked(globalThis.fetch).mockResolvedValueOnce({
+        ok: true,
+        headers: {
+          get: vi.fn((name: string) => {
+            if (name === "content-length") return String(fileBuffer.length);
+            if (name === "content-type") return "application/pdf";
+            return null;
+          }),
+        },
+        arrayBuffer: vi.fn().mockResolvedValue(arrayBuffer),
+      } as any);
+
+      queryFn
+        .mockResolvedValueOnce({ rows: [{ settings: { workspaceKind: "judgments" } }], rowCount: 1 })
+        .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+        .mockResolvedValueOnce({
+          rows: [{ document_id: "new-doc-uuid", title: "Imported Judgment", status: "UPLOADED" }],
+          rowCount: 1,
+        })
+        .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+        .mockResolvedValueOnce({ rows: [], rowCount: 1 })
+        .mockResolvedValueOnce({ rows: [], rowCount: 1 });
+
+      const reply = createMockReply();
+      const result = await route!.handler({
+        params: { wid: "183174b5-9ee5-4812-9a8d-665f020fde91" },
+        body: {
+          repository: "high_court",
+          key: "data/pdfs/year=2023/court=DELHI/sample.pdf",
+          title: "Imported Judgment",
+        },
+        authUser: { userId: "admin-1" },
+      }, reply);
+
+      expect(reply.code).toHaveBeenCalledWith(201);
+      expect(result.document.document_id).toBe("new-doc-uuid");
+      expect(result.import.bucket).toBe("indian-high-court-judgments");
+      expect(storageProvider.upload).toHaveBeenCalledWith(
+        "183174b5-9ee5-4812-9a8d-665f020fde91",
+        "new-doc-uuid",
+        "sample.pdf",
+        expect.any(Buffer)
+      );
+      const documentInsert = queryFn.mock.calls.find(
+        (call: unknown[]) => typeof call[0] === "string" && (call[0] as string).includes("INSERT INTO document")
+      );
+      expect(documentInsert?.[1]).toContain("s3://indian-high-court-judgments/data/pdfs/year=2023/court=DELHI/sample.pdf");
+      const ingestionCall = queryFn.mock.calls.find(
+        (call: unknown[]) => typeof call[0] === "string" && (call[0] as string).includes("INSERT INTO ingestion_job")
+      );
+      expect(ingestionCall).toBeDefined();
+    });
+
+    it("rejects AWS import for non-judgment workspaces", async () => {
+      const route = app.findRoute("POST", "/api/v1/workspaces/:wid/documents/aws-import");
+      queryFn.mockResolvedValueOnce({ rows: [{ settings: { workspaceKind: "case_history" } }], rowCount: 1 });
+
+      await route!.handler({
+        params: { wid: "ws-1" },
+        body: { repository: "high_court", key: "data/pdfs/year=2023/court=DELHI/sample.pdf" },
+        authUser: { userId: "admin-1" },
+      }, createMockReply());
+
+      expect(globalThis.fetch).not.toHaveBeenCalled();
     });
   });
 
@@ -490,12 +594,14 @@ describe("document-routes", () => {
 
   describe("Route registration", () => {
     it("registers all expected routes", () => {
-      expect(app._routes).toHaveLength(12);
+      expect(app._routes).toHaveLength(14);
       expect(app.findRoute("GET", "/api/v1/workspaces/:wid/documents")).toBeDefined();
       expect(app.findRoute("GET", "/api/v1/workspaces/:wid/documents/:id")).toBeDefined();
       expect(app.findRoute("GET", "/api/v1/workspaces/:wid/documents/:id/extracted-text")).toBeDefined();
       expect(app.findRoute("GET", "/api/v1/workspaces/:wid/documents/:id/chunks")).toBeDefined();
       expect(app.findRoute("GET", "/api/v1/workspaces/:wid/documents/:id/graph")).toBeDefined();
+      expect(app.findRoute("GET", "/api/v1/workspaces/:wid/documents/aws-import/options")).toBeDefined();
+      expect(app.findRoute("POST", "/api/v1/workspaces/:wid/documents/aws-import")).toBeDefined();
       expect(app.findRoute("POST", "/api/v1/workspaces/:wid/documents")).toBeDefined();
       expect(app.findRoute("GET", "/api/v1/workspaces/:wid/documents/:id/status")).toBeDefined();
       expect(app.findRoute("POST", "/api/v1/workspaces/:wid/documents/:id/reprocess")).toBeDefined();

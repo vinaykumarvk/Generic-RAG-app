@@ -81,6 +81,10 @@ export function Sidebar({ collapsed = false, onToggleCollapse, onClose }: Sideba
               <BarChart3 size={18} className="shrink-0" />
               {!collapsed && "Analytics"}
             </NavLink>
+            <NavLink to={`/workspace/${workspaceId}/district-analytics`} data-tooltip="District Analytics" className={linkClass}>
+              <BarChart3 size={18} className="shrink-0" />
+              {!collapsed && "District Analytics"}
+            </NavLink>
           </div>
         )}
 

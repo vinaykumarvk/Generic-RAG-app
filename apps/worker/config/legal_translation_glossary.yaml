@@ -1,0 +1,45 @@
+version: district-legal-glossary-v1
+target_language: en
+terms:
+  - source: FIR
+    target: FIR
+    preserve: true
+  - source: CNR
+    target: CNR
+    preserve: true
+  - source: POCSO
+    target: POCSO
+    preserve: true
+  - source: IPC
+    target: IPC
+    preserve: true
+  - source: BNS
+    target: BNS
+    preserve: true
+  - source: CrPC
+    target: CrPC
+    preserve: true
+  - source: NDPS
+    target: NDPS
+    preserve: true
+  - source: accused
+    target: accused
+    preserve: false
+  - source: prosecutrix
+    target: prosecutrix
+    preserve: false
+  - source: charge sheet
+    target: charge sheet
+    preserve: false
+  - source: cognizance
+    target: cognizance
+    preserve: false
+  - source: acquittal
+    target: acquittal
+    preserve: false
+  - source: conviction
+    target: conviction
+    preserve: false
+  - source: hostile witness
+    target: hostile witness
+    preserve: false

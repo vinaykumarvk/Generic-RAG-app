@@ -14,7 +14,7 @@ from langextract.core import exceptions as lx_exceptions
 from langextract.core import types as lx_core_types
 from langextract.data import ExampleData as LxExampleData, Extraction as LxExtraction
 from langextract.providers.openai import OpenAILanguageModel
-from psycopg2.extras import execute_values
+from psycopg2.extras import Json, execute_values
 
 from ..config import config
 from ..db import get_connection, get_cursor
@@ -23,6 +23,20 @@ logger = logging.getLogger(__name__)
 
 CHUNK_BATCH_SIZE = config.KG_CONCURRENCY
 MIN_RATE = 100  # Minimum chunks/min threshold for performance warning (FR-009/AC-04)
+HIGH_IMPACT_LEGAL_EDGE_TYPES = {
+    "outcome_caused_by",
+    "supports_acquittal",
+    "supports_conviction",
+    "lapse_caused_doubt",
+    "non_compliance_with",
+    "evidence_rejected_because",
+}
+LEGAL_ASSERTION_EDGE_TYPES = HIGH_IMPACT_LEGAL_EDGE_TYPES | {
+    "holding_supported_by",
+    "reason_based_on",
+    "finding_on",
+    "later_treated_as",
+}
 
 # ---------------------------------------------------------------------------
 # Default ontology — expanded from 8 to ~31 entity types, 7 to ~24 edge types
@@ -165,6 +179,39 @@ def _get_workspace_ontology(workspace_id: str) -> dict:
     return ontology
 
 
+def _get_ontology_version(ontology: dict) -> str | None:
+    """Return the ontology version used for extraction metadata."""
+    version = ontology.get("version")
+    if isinstance(version, str) and version.strip():
+        return version.strip()
+    return None
+
+
+def _is_judgment_ontology(ontology: dict) -> bool:
+    """Identify judgment workspaces by ontology settings."""
+    version = (_get_ontology_version(ontology) or "").lower()
+    domain = str(ontology.get("domain") or "").lower()
+    return (
+        version.startswith("judgment-legal-ontology")
+        or "judgment" in domain
+        or "phase0EvidenceContract" in ontology
+    )
+
+
+def _is_closed_schema_ontology(ontology: dict) -> bool:
+    """Judgment extraction is closed-schema by default."""
+    return bool(ontology.get("closedSchema")) or _is_judgment_ontology(ontology)
+
+
+def _format_ontology_rules(ontology: dict) -> str:
+    """Render ontology extraction rules for prompts without overwhelming them."""
+    rules = ontology.get("extractionRules") or []
+    if not isinstance(rules, list):
+        return ""
+    rendered = [f"- {rule}" for rule in rules if isinstance(rule, str) and rule.strip()]
+    return "\n".join(rendered[:12])
+
+
 # ---------------------------------------------------------------------------
 # Prompt builders
 # ---------------------------------------------------------------------------
@@ -174,6 +221,8 @@ def _build_entity_prompt(ontology: dict) -> str:
     type_descriptions = "\n".join(
         f"  - {nt['type']}: {nt.get('label', nt['type'])}" for nt in ontology.get("nodeTypes", [])
     )
+    ontology_rules = _format_ontology_rules(ontology)
+    additional_rules = f"\nOntology-specific rules:\n{ontology_rules}\n" if ontology_rules else ""
     return (
         "Extract all named entities from the following text. "
         "For each entity, provide its name, type, and a brief description.\n\n"
@@ -183,6 +232,7 @@ def _build_entity_prompt(ontology: dict) -> str:
         "- Normalize entity names (capitalize properly, remove redundancy)\n"
         "- Each entity must have a brief description (1-2 sentences)\n"
         "- Be thorough — extract every meaningful entity mentioned\n"
+        f"{additional_rules}"
     )
 
 
@@ -192,6 +242,12 @@ def _build_relationship_prompt(ontology: dict, entity_names: list[str]) -> str:
         f"  - {et['type']}: {et.get('label', et['type'])}" for et in ontology.get("edgeTypes", [])
     )
     entity_list = ", ".join(entity_names[:config.KG_MAX_ENTITIES_FOR_RELS])
+    ontology_rules = _format_ontology_rules(ontology)
+    additional_rules = f"\nOntology-specific rules:\n{ontology_rules}\n" if ontology_rules else ""
+    if _is_closed_schema_ontology(ontology):
+        type_rule = "- Only use the relationship types listed above. Do not introduce new relationship types; omit relationships when no listed type fits\n"
+    else:
+        type_rule = "- Prefer the relationship types listed above, but introduce new ones if needed\n"
     return (
         "Extract all relationships between the entities listed below from the text. "
         "For each relationship, provide the source entity, target entity, relationship type, "
@@ -200,8 +256,9 @@ def _build_relationship_prompt(ontology: dict, entity_names: list[str]) -> str:
         f"Relationship types:\n{edge_descriptions}\n\n"
         "Rules:\n"
         "- Only create relationships between the entities listed above\n"
-        "- Prefer the relationship types listed above, but introduce new ones if needed\n"
+        f"{type_rule}"
         "- Each relationship must have a brief evidence description\n"
+        f"{additional_rules}"
     )
 
 
@@ -209,8 +266,114 @@ def _build_relationship_prompt(ontology: dict, entity_names: list[str]) -> str:
 # Few-shot examples for LangExtract
 # ---------------------------------------------------------------------------
 
-def _build_entity_examples() -> list:
+def _build_legal_entity_examples() -> list:
+    """Few-shot examples tuned for judgment extraction."""
+    return [
+        LxExampleData(
+            text=(
+                "The Supreme Court held that Section 50 of the NDPS Act was not complied with "
+                "because the accused was not informed of the right to be searched before a "
+                "gazetted officer or Magistrate. The conviction was set aside."
+            ),
+            extractions=[
+                LxExtraction(
+                    extraction_text="Supreme Court",
+                    extraction_class="court",
+                    description="Court deciding the NDPS appeal",
+                ),
+                LxExtraction(
+                    extraction_text="Section 50 of the NDPS Act",
+                    extraction_class="statutory_section",
+                    description="Procedural safeguard for personal search under the NDPS Act",
+                ),
+                LxExtraction(
+                    extraction_text="right to be searched before a gazetted officer or Magistrate",
+                    extraction_class="procedural_requirement",
+                    description="Section 50 option notice requirement discussed by the court",
+                ),
+                LxExtraction(
+                    extraction_text="conviction was set aside",
+                    extraction_class="outcome",
+                    description="Final appeal outcome adverse to the prosecution",
+                ),
+            ],
+        ),
+        LxExampleData(
+            text=(
+                "The High Court distinguished the precedent because the recovery was from a bag "
+                "and not from the person of the accused. The court found the seizure memo and FSL "
+                "seal evidence reliable."
+            ),
+            extractions=[
+                LxExtraction(
+                    extraction_text="High Court",
+                    extraction_class="court",
+                    description="Court applying precedent to a search and seizure fact pattern",
+                ),
+                LxExtraction(
+                    extraction_text="recovery was from a bag",
+                    extraction_class="legal_issue",
+                    description="Fact pattern relevant to whether Section 50 applies",
+                ),
+                LxExtraction(
+                    extraction_text="seizure memo",
+                    extraction_class="document_record",
+                    description="Document recording seizure of contraband",
+                ),
+                LxExtraction(
+                    extraction_text="FSL seal evidence",
+                    extraction_class="evidence",
+                    description="Forensic/seal evidence relied on for chain of custody",
+                ),
+            ],
+        ),
+        LxExampleData(
+            text=(
+                "The Sessions Court found that the hostile witness did not support the prosecution, "
+                "but the medical officer and FSL report corroborated the injury evidence. Bail was "
+                "rejected because the victim was a minor and the accused could influence witnesses. "
+                "The accused was sentenced to seven years rigorous imprisonment."
+            ),
+            extractions=[
+                LxExtraction(
+                    extraction_text="Sessions Court",
+                    extraction_class="court",
+                    description="District trial court deciding witness credibility, bail, and sentence",
+                ),
+                LxExtraction(
+                    extraction_text="hostile witness",
+                    extraction_class="person",
+                    description="Witness whose testimony did not support the prosecution case",
+                ),
+                LxExtraction(
+                    extraction_text="medical officer",
+                    extraction_class="person",
+                    description="Medical witness whose evidence corroborated injury findings",
+                ),
+                LxExtraction(
+                    extraction_text="FSL report",
+                    extraction_class="evidence",
+                    description="Forensic report relied on as corroborative evidence",
+                ),
+                LxExtraction(
+                    extraction_text="bail was rejected",
+                    extraction_class="outcome",
+                    description="Trial-court bail outcome",
+                ),
+                LxExtraction(
+                    extraction_text="seven years rigorous imprisonment",
+                    extraction_class="sentence",
+                    description="Sentence imposed by the trial court",
+                ),
+            ],
+        ),
+    ]
+
+
+def _build_entity_examples(ontology: dict | None = None) -> list:
     """Few-shot examples for entity extraction."""
+    if ontology and _is_judgment_ontology(ontology):
+        return _build_legal_entity_examples()
     return [
         LxExampleData(
             text="The Environmental Protection Agency issued regulation EPA-2024-001 on March 15, 2024, "
@@ -277,8 +440,91 @@ def _build_entity_examples() -> list:
     ]
 
 
-def _build_relationship_examples() -> list:
+def _build_legal_relationship_examples() -> list:
+    """Few-shot relationship examples for judgment KG extraction."""
+    return [
+        LxExampleData(
+            text=(
+                "The court held that non-compliance with Section 50 of the NDPS Act created "
+                "reasonable doubt and the conviction was set aside."
+            ),
+            extractions=[
+                LxExtraction(
+                    extraction_text="non-compliance with Section 50 non_compliance_with Section 50 of the NDPS Act",
+                    extraction_class="non_compliance_with",
+                    description="Court found non-compliance with the Section 50 procedural safeguard",
+                ),
+                LxExtraction(
+                    extraction_text="non-compliance with Section 50 lapse_caused_doubt reasonable doubt",
+                    extraction_class="lapse_caused_doubt",
+                    description="The procedural lapse created reasonable doubt according to the court",
+                ),
+                LxExtraction(
+                    extraction_text="conviction was set aside outcome_caused_by non-compliance with Section 50",
+                    extraction_class="outcome_caused_by",
+                    description="The outcome was materially influenced by the Section 50 lapse",
+                ),
+            ],
+        ),
+        LxExampleData(
+            text=(
+                "The High Court followed the Supreme Court precedent but distinguished cases "
+                "involving personal search because this recovery was from a bag."
+            ),
+            extractions=[
+                LxExtraction(
+                    extraction_text="High Court follows Supreme Court precedent",
+                    extraction_class="follows",
+                    description="The High Court followed binding Supreme Court authority",
+                ),
+                LxExtraction(
+                    extraction_text="High Court distinguishes personal search cases",
+                    extraction_class="distinguishes",
+                    description="The court distinguished precedents on personal search",
+                ),
+                LxExtraction(
+                    extraction_text="recovery from bag concerns_issue Section 50 applicability",
+                    extraction_class="concerns_issue",
+                    description="The bag recovery fact pattern concerns Section 50 applicability",
+                ),
+            ],
+        ),
+        LxExampleData(
+            text=(
+                "The Sessions Court rejected the hostile witness testimony because it contradicted "
+                "the section 164 statement. The FSL report supported conviction. Bail was rejected "
+                "on witness influence risk, and the accused was sentenced to seven years imprisonment."
+            ),
+            extractions=[
+                LxExtraction(
+                    extraction_text="hostile witness testimony evidence_rejected_because contradiction with section 164 statement",
+                    extraction_class="evidence_rejected_because",
+                    description="The trial court rejected testimony for a credibility contradiction",
+                ),
+                LxExtraction(
+                    extraction_text="FSL report supports_conviction conviction",
+                    extraction_class="supports_conviction",
+                    description="The forensic report supported conviction according to the court",
+                ),
+                LxExtraction(
+                    extraction_text="bail denied_relief witness influence risk",
+                    extraction_class="denies_relief",
+                    description="The court rejected bail based on risk of influencing witnesses",
+                ),
+                LxExtraction(
+                    extraction_text="accused sentenced_to seven years imprisonment",
+                    extraction_class="sentenced_to",
+                    description="The court imposed a sentence of seven years imprisonment",
+                ),
+            ],
+        ),
+    ]
+
+
+def _build_relationship_examples(ontology: dict | None = None) -> list:
     """Few-shot examples for relationship extraction."""
+    if ontology and _is_judgment_ontology(ontology):
+        return _build_legal_relationship_examples()
     return [
         LxExampleData(
             text="The Environmental Protection Agency issued regulation EPA-2024-001 on March 15, 2024, "
@@ -627,6 +873,22 @@ def _compute_extraction_confidence(ext) -> float:
     return min(conf, 1.0)
 
 
+def _source_span_from_extraction(ext, chunk_id: str) -> dict:
+    """Build a conservative source span payload for review and citation."""
+    span = {
+        "chunk_id": chunk_id,
+        "anchor_quality": "chunk",
+        "quote": (ext.extraction_text or "")[:500],
+    }
+    if ext.description:
+        span["evidence_description"] = ext.description[:500]
+    if hasattr(ext, "char_interval") and ext.char_interval is not None:
+        span["char_start"] = ext.char_interval.start_pos
+        span["char_end"] = ext.char_interval.end_pos
+        span["anchor_quality"] = "char_span"
+    return span
+
+
 def _convert_extractions_to_nodes(
     extractions: list, chunk_id: str, valid_types: set, ontology: dict | None = None,
 ) -> list[dict]:
@@ -676,7 +938,13 @@ def _match_entity_name(name_fragment: str, entity_names: list[str]) -> str | Non
     return best_name if best_ratio >= 0.6 else None
 
 
-def _convert_extractions_to_edges(extractions: list, chunk_id: str, entity_names: list[str]) -> list[dict]:
+def _convert_extractions_to_edges(
+    extractions: list,
+    chunk_id: str,
+    entity_names: list[str],
+    valid_edge_types: set | None = None,
+    closed_schema: bool = False,
+) -> list[dict]:
     """Convert LangExtract relationship Extraction objects into edge dicts.
 
     The extracted_text for relationships is expected to contain source and target
@@ -688,17 +956,34 @@ def _convert_extractions_to_edges(extractions: list, chunk_id: str, entity_names
         text = ext.extraction_text.strip()
         edge_type = ext.extraction_class or "related_to"
         description = ext.description or ""
+        if valid_edge_types and edge_type not in valid_edge_types:
+            if closed_schema:
+                logger.warning(
+                    "Rejected out-of-ontology edge type '%s' for chunk %s",
+                    edge_type,
+                    chunk_id,
+                )
+                continue
+            edge_type = "related_to" if "related_to" in valid_edge_types else edge_type
 
         # Try to split the extracted text to find source and target entities
         source_name, target_name = _parse_relationship_text(text, edge_type, entity_names)
 
         if source_name and target_name:
+            confidence = _compute_extraction_confidence(ext)
+            high_impact = edge_type in HIGH_IMPACT_LEGAL_EDGE_TYPES
+            source_span = _source_span_from_extraction(ext, chunk_id)
+            review_status = "needs_review" if high_impact else "unreviewed"
             edges.append({
                 "source": source_name,
                 "target": target_name,
                 "type": edge_type,
                 "description": description,
                 "chunk_id": chunk_id,
+                "confidence": confidence,
+                "high_impact": high_impact,
+                "review_status": review_status,
+                "source_span": source_span,
             })
     return edges
 
@@ -1013,12 +1298,32 @@ def _store_edges(workspace_id: str, document_id: str, edges: list) -> list[dict]
         tgt_id = name_to_node_id.get(target_name)
         if not src_id or not tgt_id:
             continue
+        properties = {
+            "description": edge.get("description", ""),
+            "high_impact": bool(edge.get("high_impact", False)),
+        }
         upsert_rows.append((
             workspace_id, str(src_id), str(tgt_id),
             edge.get("type", "related_to"),
+            edge.get("description") or None,
+            json.dumps(properties, default=str),
             edge.get("chunk_id"), document_id,
+            edge.get("confidence", 1.0),
+            edge.get("review_status", "unreviewed"),
+            Json(edge.get("source_span", {})),
+            bool(edge.get("high_impact", False)),
         ))
-        edge_meta.append({"chunk_id": edge.get("chunk_id")})
+        edge_meta.append({
+            "chunk_id": edge.get("chunk_id"),
+            "edge_type": edge.get("type", "related_to"),
+            "confidence": edge.get("confidence", 1.0),
+            "review_status": edge.get("review_status", "unreviewed"),
+            "source_span": edge.get("source_span", {}),
+            "high_impact": bool(edge.get("high_impact", False)),
+            "description": edge.get("description", ""),
+            "source_node_id": str(src_id),
+            "target_node_id": str(tgt_id),
+        })
 
     if not upsert_rows:
         return []
@@ -1043,20 +1348,33 @@ def _store_edges(workspace_id: str, document_id: str, edges: list) -> list[dict]
                 cur,
                 """INSERT INTO graph_edge
                      (workspace_id, source_node_id, target_node_id, edge_type,
-                      evidence_chunk_id, document_id)
+                      label, properties, evidence_chunk_id, document_id,
+                      confidence, review_status, source_span, high_impact)
                    VALUES %s
                    ON CONFLICT (workspace_id, source_node_id, target_node_id, edge_type)
                    DO UPDATE SET weight = LEAST(graph_edge.weight + 0.1, 1.0),
-                                 document_id = EXCLUDED.document_id
+                                 document_id = EXCLUDED.document_id,
+                                 label = COALESCE(EXCLUDED.label, graph_edge.label),
+                                 properties = COALESCE(graph_edge.properties, '{}'::jsonb) || EXCLUDED.properties,
+                                 confidence = GREATEST(graph_edge.confidence, EXCLUDED.confidence),
+                                 review_status = CASE
+                                   WHEN graph_edge.review_status = 'approved' THEN graph_edge.review_status
+                                   ELSE EXCLUDED.review_status
+                                 END,
+                                 source_span = CASE
+                                   WHEN graph_edge.source_span = '{}'::jsonb THEN EXCLUDED.source_span
+                                   ELSE graph_edge.source_span
+                                 END,
+                                 high_impact = graph_edge.high_impact OR EXCLUDED.high_impact
                    RETURNING edge_id""",
                 upsert_rows,
-                template="(%s, %s::uuid, %s::uuid, %s, %s, %s)",
+                template="(%s, %s::uuid, %s::uuid, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s)",
                 page_size=500,
                 fetch=True,
             )
             for i, ret_row in enumerate(returned or []):
                 edge_id = ret_row["edge_id"] if isinstance(ret_row, dict) else ret_row[0]
-                stored.append({"edge_id": edge_id, "chunk_id": edge_meta[i]["chunk_id"]})
+                stored.append({"edge_id": edge_id, **edge_meta[i]})
 
     return stored
 
@@ -1066,14 +1384,40 @@ def _store_provenance(
     document_id: str,
     stored_nodes: list[dict],
     stored_edges: list[dict],
+    ontology_version: str | None = None,
 ):
     """Write provenance records for extracted nodes and edges (batch INSERT)."""
     model_name = _get_kg_model_id()
+    review_status = "unreviewed"
     rows = [
-        (workspace_id, "NODE", sn["node_id"], sn.get("chunk_id"), document_id, model_name, 1.0)
+        (
+            workspace_id,
+            "NODE",
+            sn["node_id"],
+            sn.get("chunk_id"),
+            document_id,
+            model_name,
+            1.0,
+            ontology_version,
+            None,
+            review_status,
+            Json({"chunk_id": sn.get("chunk_id"), "anchor_quality": "chunk"}),
+        )
         for sn in stored_nodes
     ] + [
-        (workspace_id, "EDGE", se["edge_id"], se.get("chunk_id"), document_id, model_name, 1.0)
+        (
+            workspace_id,
+            "EDGE",
+            se["edge_id"],
+            se.get("chunk_id"),
+            document_id,
+            model_name,
+            se.get("confidence", 1.0),
+            ontology_version,
+            se.get("edge_type"),
+            se.get("review_status", review_status),
+            Json(se.get("source_span") or {"chunk_id": se.get("chunk_id"), "anchor_quality": "chunk"}),
+        )
         for se in stored_edges
     ]
     if not rows:
@@ -1085,13 +1429,225 @@ def _store_provenance(
                     cur,
                     """INSERT INTO kg_provenance
                          (workspace_id, entity_type, entity_id, source_chunk_id, document_id,
-                          extraction_model, confidence)
+                          extraction_model, confidence, ontology_version, claim_type, review_status, source_span)
                        VALUES %s""",
                     rows,
                     page_size=500,
                 )
     except Exception as e:
         logger.warning(f"Failed to store provenance records: {e}")
+
+
+def _assertion_type_for_edge(edge_type: str) -> str:
+    if edge_type in {"outcome_caused_by", "supports_acquittal", "supports_conviction", "lapse_caused_doubt"}:
+        return "outcome_reason"
+    if edge_type in {"non_compliance_with", "evidence_rejected_because"}:
+        return "procedural_defect"
+    if edge_type in {"later_treated_as"}:
+        return "authority_treatment"
+    return "finding_of_law"
+
+
+def _store_legal_edge_assertions(
+    workspace_id: str,
+    document_id: str,
+    stored_edges: list[dict],
+    ontology_version: str | None,
+):
+    """Create claim-level assertions for high-impact legal edges."""
+    assertion_edges = [edge for edge in stored_edges if edge.get("edge_type") in LEGAL_ASSERTION_EDGE_TYPES]
+    if not assertion_edges:
+        return
+
+    rows = []
+    for edge in assertion_edges:
+        rows.append((
+            workspace_id,
+            _assertion_type_for_edge(edge.get("edge_type", "")),
+            edge.get("source_node_id"),
+            edge.get("edge_type"),
+            edge.get("target_node_id"),
+            edge.get("description") or "",
+            edge.get("confidence", 1.0),
+            edge.get("edge_id"),
+            edge.get("chunk_id"),
+            document_id,
+            Json({
+                "edge_type": edge.get("edge_type"),
+                "high_impact": edge.get("high_impact", False),
+            }),
+            ontology_version,
+            edge.get("edge_type"),
+            edge.get("review_status", "unreviewed"),
+            Json(edge.get("source_span") or {}),
+        ))
+
+    try:
+        with get_connection() as conn:
+            with get_cursor(conn) as cur:
+                execute_values(
+                    cur,
+                    """INSERT INTO kg_assertion (
+                         workspace_id, assertion_type, subject_node_id, predicate, object_node_id,
+                         object_value, confidence, evidence_edge_id, source_chunk_id, document_id,
+                         properties, ontology_version, claim_type, review_status, source_span
+                       )
+                       VALUES %s""",
+                    rows,
+                    template="(%s, %s, %s::uuid, %s, %s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    page_size=500,
+                )
+    except Exception as e:
+        logger.warning(f"Failed to store legal edge assertions: {e}")
+
+
+def _flag_legal_edges_for_review(
+    workspace_id: str,
+    document_id: str,
+    stored_edges: list[dict],
+    ontology_version: str | None,
+):
+    """Create review queue items for high-impact or weak legal inferences."""
+    review_edges = [
+        edge for edge in stored_edges
+        if edge.get("high_impact") or edge.get("confidence", 1.0) < 0.85
+    ]
+    if not review_edges:
+        return
+
+    try:
+        with get_connection() as conn:
+            with get_cursor(conn) as cur:
+                for edge in review_edges:
+                    reasons = []
+                    if edge.get("high_impact"):
+                        reasons.append(f"High-impact legal edge '{edge.get('edge_type')}' requires review")
+                    if edge.get("confidence", 1.0) < 0.85:
+                        reasons.append(f"Low-confidence legal edge: {edge.get('confidence', 0):.2f}")
+                    source_span = edge.get("source_span") or {}
+                    if edge.get("high_impact") and not source_span.get("quote"):
+                        reasons.append("Missing quoted source span")
+
+                    cur.execute("""
+                        INSERT INTO review_queue (
+                          workspace_id, entity_type, entity_id, reason, details,
+                          review_category, priority_score, ontology_version
+                        )
+                        VALUES (%s, 'GRAPH_EDGE', %s, %s, %s::jsonb, %s, %s, %s)
+                    """, (
+                        workspace_id,
+                        edge["edge_id"],
+                        "; ".join(reasons),
+                        json.dumps({
+                            "domain": "legal_kg",
+                            "document_id": document_id,
+                            "edge_type": edge.get("edge_type"),
+                            "source_span": source_span,
+                        }, default=str),
+                        "legal_kg_high_impact",
+                        90 if edge.get("high_impact") else 50,
+                        ontology_version,
+                    ))
+    except Exception as e:
+        logger.warning(f"Failed to flag legal edges for review: {e}")
+
+
+def _write_graph_quality_report(workspace_id: str, document_id: str, ontology_version: str | None):
+    """Write a per-document graph QA report for judgment extraction."""
+    try:
+        with get_connection() as conn:
+            with get_cursor(conn) as cur:
+                cur.execute("""
+                    SELECT
+                      count(*)::int as total_edges,
+                      count(*) FILTER (WHERE edge_type = 'related_to')::int as related_to_edges,
+                      count(*) FILTER (WHERE high_impact = true AND review_status != 'approved')::int as high_impact_unreviewed_edges,
+                      count(*) FILTER (WHERE confidence < 0.85)::int as low_confidence_edges,
+                      count(*) FILTER (
+                        WHERE high_impact = true
+                          AND COALESCE(source_span->>'quote', '') = ''
+                      )::int as ungrounded_high_impact_edges
+                    FROM graph_edge
+                    WHERE workspace_id = %s AND document_id = %s
+                """, (workspace_id, document_id))
+                edge_row = cur.fetchone() or {}
+
+                cur.execute("""
+                    SELECT count(*)::int as dangling_nodes
+                    FROM graph_node gn
+                    JOIN kg_provenance kp ON kp.entity_id = gn.node_id AND kp.entity_type = 'NODE'
+                    WHERE kp.workspace_id = %s
+                      AND kp.document_id = %s
+                      AND NOT EXISTS (
+                        SELECT 1 FROM graph_edge ge
+                        WHERE ge.workspace_id = %s
+                          AND (ge.source_node_id = gn.node_id OR ge.target_node_id = gn.node_id)
+                      )
+                """, (workspace_id, document_id, workspace_id))
+                node_row = cur.fetchone() or {}
+
+                total_edges = edge_row.get("total_edges") or 0
+                related_to_edges = edge_row.get("related_to_edges") or 0
+                related_to_ratio = related_to_edges / total_edges if total_edges else 0
+                details = {
+                    "related_to_threshold": 0.25,
+                    "requires_review": (
+                        related_to_ratio > 0.25
+                        or (edge_row.get("high_impact_unreviewed_edges") or 0) > 0
+                        or (edge_row.get("ungrounded_high_impact_edges") or 0) > 0
+                    ),
+                }
+
+                cur.execute("""
+                    INSERT INTO judgment_kg_quality_report (
+                      workspace_id, document_id, ontology_version, total_edges, related_to_edges,
+                      related_to_ratio, high_impact_unreviewed_edges, low_confidence_edges,
+                      ungrounded_high_impact_edges, dangling_nodes, details
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                    RETURNING report_id
+                """, (
+                    workspace_id,
+                    document_id,
+                    ontology_version,
+                    total_edges,
+                    related_to_edges,
+                    related_to_ratio,
+                    edge_row.get("high_impact_unreviewed_edges") or 0,
+                    edge_row.get("low_confidence_edges") or 0,
+                    edge_row.get("ungrounded_high_impact_edges") or 0,
+                    node_row.get("dangling_nodes") or 0,
+                    json.dumps(details),
+                ))
+                report = cur.fetchone()
+
+                if report and details["requires_review"]:
+                    cur.execute("""
+                        INSERT INTO review_queue (
+                          workspace_id, entity_type, entity_id, reason, details,
+                          review_category, priority_score, ontology_version
+                        )
+                        VALUES (%s, 'KG_QUALITY_REPORT', %s, %s, %s::jsonb, %s, %s, %s)
+                    """, (
+                        workspace_id,
+                        report["report_id"],
+                        "Judgment KG quality report requires legal review",
+                        json.dumps({
+                            "domain": "legal_kg",
+                            "document_id": document_id,
+                            "metrics": {
+                                "total_edges": total_edges,
+                                "related_to_ratio": related_to_ratio,
+                                "high_impact_unreviewed_edges": edge_row.get("high_impact_unreviewed_edges") or 0,
+                                "ungrounded_high_impact_edges": edge_row.get("ungrounded_high_impact_edges") or 0,
+                            },
+                        }, default=str),
+                        "legal_kg_quality",
+                        80,
+                        ontology_version,
+                    ))
+    except Exception as e:
+        logger.warning(f"Failed to write graph quality report: {e}")
 
 
 def _flag_conflicts_for_review(workspace_id: str, document_id: str, nodes: list):
@@ -1154,6 +1710,8 @@ def _extract_chunk_kg(
     entity_examples: list,
     rel_examples: list,
     valid_types: set,
+    valid_edge_types: set,
+    closed_schema: bool,
     ontology: dict,
 ) -> tuple[list[dict], list[dict]]:
     """Extract KG nodes and edges from a single chunk. Stateless + thread-safe."""
@@ -1171,7 +1729,13 @@ def _extract_chunk_kg(
     if len(entity_names) >= 2:
         rel_prompt = _build_relationship_prompt(ontology, entity_names)
         rel_extractions = _lx_extract(content, rel_prompt, rel_examples)
-        chunk_edges = _convert_extractions_to_edges(rel_extractions, chunk_id, entity_names)
+        chunk_edges = _convert_extractions_to_edges(
+            rel_extractions,
+            chunk_id,
+            entity_names,
+            valid_edge_types,
+            closed_schema,
+        )
 
     return chunk_nodes, chunk_edges
 
@@ -1208,9 +1772,18 @@ def extract_kg(document_id: str, workspace_id: str):
     logger.info(f"Extracting KG from {total} chunks for document {document_id}")
 
     valid_types = {nt["type"] for nt in ontology.get("nodeTypes", [])}
+    valid_edge_types = {et["type"] for et in ontology.get("edgeTypes", [])}
+    closed_schema = _is_closed_schema_ontology(ontology)
     entity_prompt = _build_entity_prompt(ontology)
-    entity_examples = _build_entity_examples()
-    rel_examples = _build_relationship_examples()
+    entity_examples = _build_entity_examples(ontology)
+    rel_examples = _build_relationship_examples(ontology)
+
+    logger.info(
+        "KG ontology version=%s closed_schema=%s assertion_types=%d",
+        _get_ontology_version(ontology) or "default",
+        closed_schema,
+        len(ontology.get("assertionTypes", []) or []),
+    )
 
     all_nodes: list[dict] = []
     all_edges: list[dict] = []
@@ -1225,7 +1798,7 @@ def extract_kg(document_id: str, workspace_id: str):
                 executor.submit(
                     _extract_chunk_kg, chunk,
                     entity_prompt, entity_examples, rel_examples,
-                    valid_types, ontology,
+                    valid_types, valid_edge_types, closed_schema, ontology,
                 ): chunk
                 for chunk in batch
             }
@@ -1255,9 +1828,16 @@ def extract_kg(document_id: str, workspace_id: str):
 
     # Store edges
     stored_edges = _store_edges(workspace_id, document_id, all_edges)
+    ontology_version = _get_ontology_version(ontology)
 
     # Write provenance records
-    _store_provenance(workspace_id, document_id, stored_nodes, stored_edges)
+    _store_provenance(workspace_id, document_id, stored_nodes, stored_edges, ontology_version)
+
+    # Legal claim-level assertions and review gates
+    if _is_judgment_ontology(ontology):
+        _store_legal_edge_assertions(workspace_id, document_id, stored_edges, ontology_version)
+        _flag_legal_edges_for_review(workspace_id, document_id, stored_edges, ontology_version)
+        _write_graph_quality_report(workspace_id, document_id, ontology_version)
 
     # FR-012: Create review_queue entries for potential conflicts/duplicates
     _flag_conflicts_for_review(workspace_id, document_id, all_nodes)

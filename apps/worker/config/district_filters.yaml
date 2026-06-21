@@ -1,0 +1,210 @@
+version: district-criminal-v1
+description: Canonical district-court criminal-law filter for metadata bootstrap and targeted text acquisition.
+
+scope:
+  date_range:
+    from: "2015-01-01"
+    to: current
+  states:
+    include:
+      - code: 9
+        name: Uttar Pradesh
+        languages: [hi, en]
+        pilot_priority: 1
+      - code: 27
+        name: Maharashtra
+        languages: [mr, hi, en]
+        pilot_priority: 2
+      - code: 29
+        name: Karnataka
+        languages: [kn, en]
+        pilot_priority: 3
+      - code: 33
+        name: Tamil Nadu
+        languages: [ta, en]
+        pilot_priority: 4
+      - code: 26
+        name: Delhi
+        languages: [hi, en]
+        pilot_priority: 5
+    exclude: []
+  court_levels:
+    include:
+      - sessions
+      - magistrate
+      - family
+      - special_pocso
+    exclude: []
+  document_types:
+    include:
+      - final_judgment
+      - bail_order
+      - charge_framing_order
+      - discharge_order
+      - sentencing_order
+    exclude:
+      - adjournment
+      - cause_list
+      - routine_process_order
+
+offence_filters:
+  - id: POCSO_2012
+    category: child_sexual_offence
+    acts:
+      - POCSO
+      - Protection of Children from Sexual Offences
+    sections: []
+    sensitivity_flags:
+      - minor_identity
+      - sexual_offence_detail
+      - victim_identity
+  - id: IPC_302
+    category: murder
+    acts:
+      - IPC
+      - Indian Penal Code
+    sections: ["302"]
+    keywords: [murder, homicide]
+  - id: IPC_354
+    category: sexual_assault
+    acts:
+      - IPC
+      - Indian Penal Code
+    sections: ["354", "354A", "354B", "354C", "354D"]
+    sensitivity_flags:
+      - sexual_offence_detail
+      - victim_identity
+  - id: IPC_363_366
+    category: kidnapping_abduction
+    acts:
+      - IPC
+      - Indian Penal Code
+    sections: ["363", "364", "365", "366"]
+    sensitivity_flags:
+      - minor_identity
+  - id: IPC_375_376
+    category: rape
+    acts:
+      - IPC
+      - Indian Penal Code
+    sections: ["375", "376"]
+    keywords: [rape]
+    sensitivity_flags:
+      - sexual_offence_detail
+      - victim_identity
+  - id: BNS_63_70
+    category: sexual_offence
+    acts:
+      - BNS
+      - Bharatiya Nyaya Sanhita
+    sections: ["63", "64", "65", "66", "67", "68", "69", "70"]
+    sensitivity_flags:
+      - sexual_offence_detail
+      - victim_identity
+  - id: BNS_103
+    category: murder
+    acts:
+      - BNS
+      - Bharatiya Nyaya Sanhita
+    sections: ["103"]
+  - id: NDPS
+    category: narcotics
+    acts:
+      - NDPS
+      - Narcotic Drugs and Psychotropic Substances
+    sections: []
+  - id: JJ_ACT
+    category: juvenile_justice
+    acts:
+      - Juvenile Justice
+      - JJ Act
+    sections: []
+    sensitivity_flags:
+      - minor_identity
+
+source_policy:
+  ddl:
+    enabled: true
+    content_type: metadata
+    license_classification: commercial_safe
+    create_documents: false
+  ecourts:
+    enabled: true
+    content_type: metadata_and_text
+    license_classification: internal_only
+    create_documents: true
+    captcha_mode: operator_queue
+    min_delay_ms: 3000
+    max_workers: 1
+  indian_kanoon:
+    enabled: false
+    content_type: clean_text
+    license_classification: internal_only
+    create_documents: true
+    exact_cnr_first: true
+  hldc:
+    enabled: false
+    content_type: clean_text
+    license_classification: non_commercial
+    create_documents: true
+    commercial_safe: false
+  nyayaanumana:
+    enabled: false
+    content_type: mixed
+    license_classification: pending_review
+    create_documents: false
+
+redaction:
+  required_for_categories:
+    - child_sexual_offence
+    - rape
+    - sexual_assault
+    - sexual_offence
+    - juvenile_justice
+  always_redact:
+    - victim_name
+    - minor_name
+    - protected_witness_name
+    - residential_address
+    - school_name
+    - phone_number
+    - aadhaar
+    - pan
+    - date_of_birth
+    - medical_identifier
+  preserve_when_safe:
+    - court_name
+    - judge_name
+    - counsel_name
+    - police_station
+    - fir_number
+    - statute
+    - section
+    - cnr
+    - generalized_district
+    - final_outcome
+
+translation:
+  default_target_language: en
+  preserve_original_text: true
+  redact_before_external_translation: true
+  languages:
+    include: [en, hi, mr, kn, ta]
+  glossary_version: district-legal-glossary-v1
+  qa_sample_rate: 0.05
+
+analytics:
+  aggregate_refresh: daily
+  dimensions:
+    - state
+    - district
+    - court_level
+    - case_type
+    - statute
+    - section
+    - offence_category
+    - disposition
+    - language
+    - source
+    - license_classification
+  commercial_safe_default: true

@@ -5,6 +5,10 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-eng \
+    tesseract-ocr-hin \
+    tesseract-ocr-mar \
+    tesseract-ocr-kan \
+    tesseract-ocr-tam \
     antiword \
     libpq-dev \
     poppler-utils \
@@ -17,6 +21,7 @@ COPY apps/worker/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY apps/worker/src/ ./src/
+COPY apps/worker/config/ ./config/
 
 RUN mkdir -p /app/uploads && useradd -m worker && chown -R worker:worker /app
 USER worker

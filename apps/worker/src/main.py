@@ -6,6 +6,7 @@ import threading
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from .job_poller import run_poller
+from .district.acquisition_worker import run_acquisition_poller
 from .config import config
 from .db import get_pool
 
@@ -34,6 +35,18 @@ async def startup():
         )
         thread.start()
     logger.info("Job poller threads started: count=%s", config.POLLER_THREADS)
+
+    if config.DISTRICT_ACQUISITION_ENABLED:
+        for index in range(config.DISTRICT_ACQUISITION_THREADS):
+            thread_name = f"district-acquisition-{index + 1}"
+            thread = threading.Thread(
+                target=run_acquisition_poller,
+                kwargs={"worker_name": thread_name},
+                daemon=True,
+                name=thread_name,
+            )
+            thread.start()
+        logger.info("District acquisition poller threads started: count=%s", config.DISTRICT_ACQUISITION_THREADS)
 
     # Register graceful shutdown handlers
     def handle_signal(signum, frame):

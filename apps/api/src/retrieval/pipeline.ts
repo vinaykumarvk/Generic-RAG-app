@@ -28,8 +28,12 @@ import { graphContextLookup } from "./graph-context";
 import { rerank } from "./reranker";
 import { generateAnswer } from "./answer-generator";
 import { persistRetrievalTrace, type RetrievalTraceStepInput } from "./trace-recorder";
+import { planJudgmentQuery, type JudgmentQueryPlan } from "./query-planner";
+import { answerDistrictAnalyticsQuestion } from "./district-analytics-answer";
+import { logWikiCoverageGap, selectWikiArticles, type WikiArticleResult } from "./wiki-selector";
 import { filterChunksByAccess, buildAccessSignature } from "../middleware/sensitivity-guard";
 import type { RankedChunk } from "./reranker";
+import type { JudgmentSearchFilters } from "./judgment-filters";
 
 /** Per-preset model overrides for answer generation (env-configured) */
 const PRESET_MODEL_ENV_KEYS: Record<string, string> = {
@@ -49,15 +53,16 @@ export interface PipelineRequest {
   conversationId?: string;
   userId: string;
   preset: "concise" | "balanced" | "detailed";
-  mode?: "hybrid" | "vector_only" | "metadata_only" | "graph_only";
+  mode?: "hybrid" | "vector_only" | "metadata_only" | "graph_only" | "wiki_only";
   skipCache?: boolean;
   regenerate?: boolean;
   skipUserMessage?: boolean;
   userClearance?: string;
   userType?: string;
-  filters?: {
+  filters?: JudgmentSearchFilters & {
     categories?: string[];
     documentIds?: string[];
+    document_ids?: string[];
     date_from?: string;
     date_to?: string;
     org_unit_id?: string;
@@ -65,7 +70,10 @@ export interface PipelineRequest {
     fir_number?: string;
     station_code?: string;
     language?: string;
+    target_language?: string;
+    translation_status?: string;
     sensitivity_levels?: string[];
+    retrieval_profile?: string;
   };
 }
 
@@ -87,6 +95,12 @@ export interface PipelineResult {
     page_number: number | null;
     excerpt: string;
     relevance_score: number;
+    source_language?: string | null;
+    target_language?: string | null;
+    translation_status?: string | null;
+    translated_excerpt?: string | null;
+    original_excerpt?: string | null;
+    translation_metadata?: Record<string, unknown>;
   }>;
   retrieval: {
     preset: string;
@@ -97,6 +111,9 @@ export interface PipelineResult {
     expanded_queries: string[];
     detected_entities: Array<{ name: string; type: string }>;
     inferred_filters?: Record<string, unknown>;
+    query_profile?: string;
+    wiki_articles?: number;
+    graph_paths?: number;
   };
 }
 
@@ -132,9 +149,15 @@ export async function executeRetrievalPipeline(
   let inferredFilters: Record<string, unknown> = {};
   let uniqueVectorResults: VectorSearchResult[] = [];
   let lexicalResults: LexicalSearchResult[] = [];
+  let queryPlan: JudgmentQueryPlan | null = null;
+  let wikiArticles: WikiArticleResult[] = [];
+  let wikiLatency = 0;
+  let wikiSourceChunkResults: VectorSearchResult[] = [];
   let graphResult = {
     nodes: [] as Array<{ node_id: string; name: string; node_type: string; subtype?: string; description: string }>,
     edges: [] as Array<{ source: string; target: string; edge_type: string; source_name: string; target_name: string }>,
+    paths: [] as Array<{ source: string; target: string; edge_type: string; source_name: string; target_name: string; confidence: number | null; review_status: string | null; evidence_chunk_id: string | null; source_span: Record<string, unknown> }>,
+    assertions: [] as Array<{ assertion_id: string; assertion_type: string; predicate: string; object_value: string | null; confidence: number; review_status: string | null; source_chunk_id: string | null; source_span: Record<string, unknown> }>,
     contextText: "",
     chunkIds: new Set<string>(),
     nodeIds: [] as string[],
@@ -463,6 +486,12 @@ export async function executeRetrievalPipeline(
         page_number: null,
         excerpt: c.excerpt,
         relevance_score: 1,
+        source_language: c.source_language,
+        target_language: c.target_language,
+        translation_status: c.translation_status,
+        translated_excerpt: c.translated_excerpt,
+        original_excerpt: c.original_excerpt,
+        translation_metadata: c.translation_metadata,
       })),
       retrieval: {
         preset: request.preset,
@@ -633,15 +662,169 @@ export async function executeRetrievalPipeline(
     },
   });
 
+  queryPlan = planJudgmentQuery(request.question, effectiveFilters);
+  if (request.filters?.retrieval_profile) {
+    queryPlan = {
+      ...queryPlan,
+      profile: request.filters.retrieval_profile as JudgmentQueryPlan["profile"],
+      confidence: Math.max(queryPlan.confidence, 0.9),
+      reasons: [...queryPlan.reasons, "explicit retrieval profile"],
+    };
+  }
+  effectiveFilters = { ...effectiveFilters, ...queryPlan.searchFilters };
+
+  addTraceStep({
+    stepKey: "query_planning",
+    title: "Judgment query planning",
+    status: "completed",
+    itemCount: queryPlan.reasons.length,
+    summary: {
+      profile: queryPlan.profile,
+      confidence: queryPlan.confidence,
+      reasons: queryPlan.reasons,
+    },
+    payload: {
+      plan: queryPlan,
+      effective_filters: effectiveFilters,
+      anti_circularity_rule: "Wiki and KG may prioritize retrieval, but raw judgment chunks must independently support legally material answer claims.",
+    },
+  });
+
+  if (queryPlan.route === "district_analytics") {
+    const analytics = await answerDistrictAnalyticsQuestion(
+      queryFn,
+      request.workspaceId,
+      request.question,
+      effectiveFilters,
+      queryPlan.analyticsIntent,
+    );
+    addTraceStep({
+      stepKey: "district_analytics",
+      title: "District analytics",
+      status: "completed",
+      latencyMs: analytics.latencyMs,
+      itemCount: analytics.detailRows.length,
+      summary: {
+        intent: analytics.intent,
+        total_cases: analytics.totals.total_cases,
+        filters: analytics.filters,
+      },
+      payload: {
+        totals: analytics.totals,
+        detail_rows: analytics.detailRows,
+        source_table: "district_case_fact_daily",
+        routing_reason: "metadata aggregate question",
+      },
+    });
+
+    const msgResult = await queryFn(
+      `INSERT INTO message (conversation_id, role, content) VALUES ($1, 'assistant', $2) RETURNING message_id`,
+      [conversationId, analytics.answer]
+    );
+    await queryFn(
+      `UPDATE conversation SET message_count = message_count + 1, updated_at = now() WHERE conversation_id = $1`,
+      [conversationId]
+    );
+    addTraceStep({
+      stepKey: "final_response",
+      title: "Final response",
+      status: "completed",
+      summary: {
+        source: "district_analytics",
+        answer_length: analytics.answer.length,
+      },
+      payload: {
+        answer: analytics.answer,
+        message_id: msgResult.rows[0].message_id,
+        citations: [],
+      },
+    });
+    const retrievalRunId = await persistTraceForMessage(
+      msgResult.rows[0].message_id,
+      Date.now() - pipelineStart,
+    );
+    return {
+      answer: analytics.answer,
+      conversationId,
+      messageId: msgResult.rows[0].message_id,
+      retrieval_run_id: retrievalRunId,
+      citations: [],
+      retrieval: {
+        preset: request.preset,
+        mode: "district_analytics",
+        total_latency_ms: Date.now() - pipelineStart,
+        cache_hit: false,
+        chunks_retrieved: 0,
+        expanded_queries: expandedQueriesWithCaseScope,
+        detected_entities: entities,
+        inferred_filters: {
+          ...(Object.keys(inferredFilters).length > 0 ? inferredFilters : {}),
+          ...analytics.filters,
+        },
+        query_profile: queryPlan.profile,
+        wiki_articles: 0,
+        graph_paths: 0,
+      },
+    };
+  }
+
+  if (mode === "hybrid" || mode === "wiki_only") {
+    const wikiStart = Date.now();
+    const wikiSelection = await selectWikiArticles(
+      { queryFn, llmProvider },
+      request.workspaceId,
+      request.question,
+      5,
+      queryPlan.wikiFilters,
+    );
+    wikiArticles = wikiSelection.results;
+    wikiLatency = wikiSelection.latencyMs || (Date.now() - wikiStart);
+
+    const wikiChunkIds = collectWikiSourceChunkIds(wikiArticles);
+    if (wikiChunkIds.length > 0) {
+      wikiSourceChunkResults = await fetchChunksByIds(queryFn, request.workspaceId, wikiChunkIds);
+    }
+
+    addTraceStep({
+      stepKey: "wiki_selection",
+      title: "Legal wiki selection",
+      status: "completed",
+      latencyMs: wikiLatency,
+      itemCount: wikiArticles.length,
+      summary: {
+        profile: queryPlan.profile,
+        article_count: wikiArticles.length,
+        source_chunk_count: wikiChunkIds.length,
+      },
+      payload: {
+        filters: queryPlan.wikiFilters,
+        articles: wikiArticles.map(toTraceWikiArticle),
+        source_chunk_ids: wikiChunkIds,
+        anti_circularity_rule: "Selected wiki articles seed retrieval and framing only; material claims still require raw judgment chunks.",
+      },
+    });
+  } else {
+    addTraceStep({
+      stepKey: "wiki_selection",
+      title: "Legal wiki selection",
+      status: "skipped",
+      summary: { reason: `mode_${mode}` },
+      payload: { mode },
+    });
+  }
+
   // Steps 4-6 based on retrieval mode (FR-015)
-  if (mode === "hybrid" || mode === "vector_only") {
-    const vectorPromises = expandedQueriesWithCaseScope.map((q) =>
+  const wikiSeedQueries = buildWikiSeedQueries(request.question, wikiArticles);
+  const retrievalQueries = Array.from(new Set([...expandedQueriesWithCaseScope, ...wikiSeedQueries]));
+  if (mode === "hybrid" || mode === "vector_only" || mode === "wiki_only") {
+    const vectorQueries = mode === "wiki_only" ? wikiSeedQueries : retrievalQueries;
+    const vectorPromises = vectorQueries.map((q) =>
       vectorSearch({ queryFn, llmProvider }, request.workspaceId, q, presetConfig.maxChunks, effectiveFilters)
     );
     const vectorResultSets = await Promise.all(vectorPromises);
-    const allVectorResults = vectorResultSets.flatMap((r) => r.results);
-    vectorLatency = Math.max(...vectorResultSets.map((r) => r.latencyMs));
-    logInfo("Vector search completed", { totalResults: allVectorResults.length, queries: expandedQueriesWithCaseScope.length });
+    const allVectorResults = [...vectorResultSets.flatMap((r) => r.results), ...wikiSourceChunkResults];
+    vectorLatency = vectorResultSets.length > 0 ? Math.max(...vectorResultSets.map((r) => r.latencyMs)) : 0;
+    logInfo("Vector search completed", { totalResults: allVectorResults.length, queries: vectorQueries.length });
 
     const seenChunkIds = new Set<string>();
     uniqueVectorResults = allVectorResults.filter((r) => {
@@ -657,12 +840,13 @@ export async function executeRetrievalPipeline(
       latencyMs: vectorLatency,
       itemCount: uniqueVectorResults.length,
       summary: {
-        queries_executed: expandedQueriesWithCaseScope.length,
+        queries_executed: vectorQueries.length,
         raw_result_count: allVectorResults.length,
         deduped_result_count: uniqueVectorResults.length,
+        wiki_source_chunks: wikiSourceChunkResults.length,
       },
       payload: {
-        queries: expandedQueriesWithCaseScope.map((query, index) => ({
+        queries: vectorQueries.map((query, index) => ({
           query,
           latency_ms: vectorResultSets[index]?.latencyMs ?? null,
           results: (vectorResultSets[index]?.results || []).map((result) => toTraceVectorResult(result)),
@@ -723,12 +907,13 @@ export async function executeRetrievalPipeline(
     const GRAPH_TIMEOUT_MS = 3000;
     const graphTimeout = new Promise<{ result: typeof graphResult; latencyMs: number }>((resolve) => {
       setTimeout(() => resolve({
-        result: { nodes: [], edges: [], contextText: "", chunkIds: new Set<string>(), nodeIds: [] },
+        result: { nodes: [], edges: [], paths: [], assertions: [], contextText: "", chunkIds: new Set<string>(), nodeIds: [] },
         latencyMs: GRAPH_TIMEOUT_MS,
       }), GRAPH_TIMEOUT_MS);
     });
+    const graphQuery = buildGraphSeedQuery(request.question, wikiArticles);
     const graphLookup = await Promise.race([
-      graphContextLookup({ queryFn, llmProvider }, request.workspaceId, request.question, entities, presetConfig.graphHops),
+      graphContextLookup({ queryFn, llmProvider }, request.workspaceId, graphQuery, entities, presetConfig.graphHops),
       graphTimeout,
     ]);
     graphResult = graphLookup.result;
@@ -742,10 +927,12 @@ export async function executeRetrievalPipeline(
       summary: {
         node_count: graphResult.nodes.length,
         edge_count: graphResult.edges.length,
+        path_count: graphResult.paths.length,
+        assertion_count: graphResult.assertions.length,
         related_chunk_count: graphResult.chunkIds.size,
       },
       payload: {
-        query: request.question,
+        query: graphQuery,
         entities,
         nodes: graphResult.nodes.map((node) => ({
           node_id: node.node_id,
@@ -755,8 +942,25 @@ export async function executeRetrievalPipeline(
           description: node.description,
         })),
         edges: graphResult.edges,
+        paths: graphResult.paths,
+        assertions: graphResult.assertions,
         related_chunk_ids: Array.from(graphResult.chunkIds),
         context_text: graphResult.contextText,
+      },
+    });
+    addTraceStep({
+      stepKey: "graph_path_extraction",
+      title: "Graph path extraction",
+      status: "completed",
+      itemCount: graphResult.paths.length,
+      summary: {
+        path_count: graphResult.paths.length,
+        assertion_count: graphResult.assertions.length,
+        source_chunk_count: getGraphPathChunkIds(graphResult).size,
+      },
+      payload: {
+        paths: graphResult.paths,
+        assertions: graphResult.assertions,
       },
     });
   } else {
@@ -771,6 +975,13 @@ export async function executeRetrievalPipeline(
         mode,
       },
     });
+    addTraceStep({
+      stepKey: "graph_path_extraction",
+      title: "Graph path extraction",
+      status: "skipped",
+      summary: { reason: `mode_${mode}` },
+      payload: { mode },
+    });
   }
 
   // Step 8: Rerank
@@ -781,6 +992,11 @@ export async function executeRetrievalPipeline(
     graphResult.chunkIds,
     presetConfig,
     presetConfig.maxChunks,
+    {
+      wikiChunkIds: new Set(collectWikiSourceChunkIds(wikiArticles)),
+      graphPathChunkIds: getGraphPathChunkIds(graphResult),
+      queryProfile: queryPlan?.profile,
+    },
   );
   rerankLatency = Date.now() - rerankStart;
 
@@ -792,10 +1008,47 @@ export async function executeRetrievalPipeline(
     itemCount: rankedChunks.length,
     summary: {
       ranked_chunk_count: rankedChunks.length,
+      query_profile: queryPlan?.profile,
     },
     payload: {
       ranked_chunks: rankedChunks.map((chunk) => toTraceRankedChunk(chunk)),
     },
+  });
+
+  addTraceStep({
+    stepKey: "evidence_fusion",
+    title: "Evidence fusion",
+    status: "completed",
+    latencyMs: rerankLatency,
+    itemCount: rankedChunks.length,
+    summary: {
+      query_profile: queryPlan?.profile,
+      wiki_article_count: wikiArticles.length,
+      graph_path_count: graphResult.paths.length,
+      vector_count: uniqueVectorResults.length,
+      lexical_count: lexicalResults.length,
+      fused_chunk_count: rankedChunks.length,
+    },
+    payload: {
+      anti_circularity_rule: "Wiki articles and graph paths can boost or explain candidates, but final legal claims must cite raw judgment chunks.",
+      wiki_articles: wikiArticles.map(toTraceWikiArticle),
+      graph_paths: graphResult.paths,
+      fused_chunks: rankedChunks.map((chunk) => toTraceRankedChunk(chunk)),
+    },
+  });
+
+  await logWikiCoverageGap(queryFn, request.workspaceId, {
+    queryText: request.question,
+    queryProfile: queryPlan?.profile,
+    filters: effectiveFilters,
+    courtCode: queryPlan?.searchFilters.court_code,
+    courtLevel: queryPlan?.searchFilters.court_level,
+    statute: queryPlan?.searchFilters.statute,
+    section: queryPlan?.searchFilters.section,
+    issueTags: queryPlan?.wikiFilters.issue_tags,
+    outcomeFocus: queryPlan?.wikiFilters.outcomes || (queryPlan?.wikiFilters.outcome ? [queryPlan.wikiFilters.outcome] : []),
+    rawEvidenceCount: uniqueVectorResults.length + lexicalResults.length,
+    approvedArticleCount: wikiArticles.length,
   });
 
   // Step 8b: Chunk access filtering (FR-002)
@@ -967,6 +1220,9 @@ export async function executeRetrievalPipeline(
         expanded_queries: expandedQueriesWithCaseScope,
         detected_entities: entities,
         inferred_filters: Object.keys(inferredFilters).length > 0 ? inferredFilters : undefined,
+        query_profile: queryPlan?.profile,
+        wiki_articles: wikiArticles.length,
+        graph_paths: graphResult.paths.length,
       },
     };
   }
@@ -993,12 +1249,13 @@ export async function executeRetrievalPipeline(
   }
   addScopeEntity(scopeEntities, getPinnedCaseReference(pinnedConversationFilters));
   const matchedCaseScopes = getMatchedCaseScopes(rankedChunks, scopeResolution.activeCaseScopes);
+  const fusionContextText = buildFusionContextText(graphResult.contextText, wikiArticles, queryPlan);
 
   const genResult = await generateAnswer(
     llmProvider,
     request.question,
     rankedChunks,
-    graphResult.contextText,
+    fusionContextText,
     history,
     request.preset,
     answerModel,
@@ -1091,6 +1348,8 @@ export async function executeRetrievalPipeline(
       follow_up_questions: genResult.followUpQuestions,
       input_chunks: rankedChunks.map((chunk) => toTraceRankedChunk(chunk)),
       graph_context: graphResult.contextText,
+      fusion_context: fusionContextText,
+      wiki_articles: wikiArticles.map(toTraceWikiArticle),
     },
   });
 
@@ -1114,15 +1373,36 @@ export async function executeRetrievalPipeline(
     let paramIdx = 1;
     for (const citation of genResult.citations) {
       citationPlaceholders.push(
-        `($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`
+        `($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`
       );
       citationValues.push(
         messageId, citation.chunk_id, citation.document_id, citation.document_title,
-        citation.page_number, citation.excerpt, citation.relevance_score, citation.citation_index
+        citation.page_number, citation.excerpt, citation.relevance_score, citation.citation_index,
+        citation.source_language || null,
+        citation.target_language || null,
+        citation.translation_status || null,
+        citation.translated_excerpt || null,
+        citation.original_excerpt || null,
+        JSON.stringify(citation.translation_metadata || {}),
       );
     }
     await queryFn(
-      `INSERT INTO citation (message_id, chunk_id, document_id, document_title, page_number, excerpt, relevance_score, citation_index)
+      `INSERT INTO citation (
+         message_id,
+         chunk_id,
+         document_id,
+         document_title,
+         page_number,
+         excerpt,
+         relevance_score,
+         citation_index,
+         source_language,
+         target_language,
+         translation_status,
+         translated_excerpt,
+         original_excerpt,
+         translation_metadata
+       )
        VALUES ${citationPlaceholders.join(", ")}`,
       citationValues
     );
@@ -1140,6 +1420,12 @@ export async function executeRetrievalPipeline(
       chunk_id: c.chunk_id,
       document_title: c.document_title,
       excerpt: c.excerpt,
+      source_language: c.source_language,
+      target_language: c.target_language,
+      translation_status: c.translation_status,
+      translated_excerpt: c.translated_excerpt,
+      original_excerpt: c.original_excerpt,
+      translation_metadata: c.translation_metadata,
     })),
     request.preset,
     accessSignature,
@@ -1251,6 +1537,12 @@ export async function executeRetrievalPipeline(
       page_number: c.page_number,
       excerpt: c.excerpt,
       relevance_score: c.relevance_score,
+      source_language: c.source_language,
+      target_language: c.target_language,
+      translation_status: c.translation_status,
+      translated_excerpt: c.translated_excerpt,
+      original_excerpt: c.original_excerpt,
+      translation_metadata: c.translation_metadata,
     })),
     retrieval: {
       preset: request.preset,
@@ -1261,8 +1553,127 @@ export async function executeRetrievalPipeline(
       expanded_queries: expandedQueriesWithCaseScope,
       detected_entities: entities,
       inferred_filters: Object.keys(inferredFilters).length > 0 ? inferredFilters : undefined,
+      query_profile: queryPlan?.profile,
+      wiki_articles: wikiArticles.length,
+      graph_paths: graphResult.paths.length,
     },
   };
+}
+
+function collectWikiSourceChunkIds(wikiArticles: WikiArticleResult[]): string[] {
+  const ids = new Set<string>();
+  for (const article of wikiArticles) {
+    for (const chunkId of article.source_chunk_ids || []) {
+      if (chunkId) ids.add(chunkId);
+    }
+  }
+  return Array.from(ids);
+}
+
+function buildWikiSeedQueries(question: string, wikiArticles: WikiArticleResult[]): string[] {
+  return wikiArticles.slice(0, 3).map((article) => [
+    question,
+    article.title,
+    article.statutes.join(" "),
+    article.sections.map((section) => `Section ${section}`).join(" "),
+    article.issue_tags.join(" "),
+  ].filter(Boolean).join(" "));
+}
+
+function buildGraphSeedQuery(question: string, wikiArticles: WikiArticleResult[]): string {
+  if (wikiArticles.length === 0) return question;
+  const seeds = wikiArticles.slice(0, 3).flatMap((article) => [
+    article.title,
+    ...article.issue_tags,
+    ...article.statutes,
+    ...article.sections.map((section) => `Section ${section}`),
+  ]);
+  return Array.from(new Set([question, ...seeds])).join("\n");
+}
+
+async function fetchChunksByIds(
+  queryFn: QueryFn,
+  workspaceId: string,
+  chunkIds: string[],
+): Promise<VectorSearchResult[]> {
+  if (chunkIds.length === 0) return [];
+  const result = await queryFn(
+    `SELECT c.chunk_id, c.document_id, c.content, c.chunk_type, c.page_start, c.heading_path,
+            d.title as document_title,
+            d.case_reference,
+            d.fir_number,
+            d.station_code,
+            jm.canonical_judgment_id as judgment_id,
+            jm.court_code,
+            jm.court_name,
+            jm.decision_date,
+            jm.neutral_citation,
+            c.paragraph_number,
+            c.section_label,
+            c.anchor_confidence,
+            0.75 as similarity
+     FROM chunk c
+     JOIN document d ON d.document_id = c.document_id
+     LEFT JOIN judgment_metadata jm ON jm.document_id = d.document_id
+     WHERE c.workspace_id = $1
+       AND c.chunk_id = ANY($2)
+       AND d.status IN ('SEARCHABLE','KG_EXTRACTING','ACTIVE')`,
+    [workspaceId, chunkIds],
+  );
+  return result.rows as VectorSearchResult[];
+}
+
+function getGraphPathChunkIds(graphResult: {
+  paths: Array<{ evidence_chunk_id: string | null }>;
+  assertions: Array<{ source_chunk_id: string | null }>;
+}): Set<string> {
+  const ids = new Set<string>();
+  for (const path of graphResult.paths || []) {
+    if (path.evidence_chunk_id) ids.add(path.evidence_chunk_id);
+  }
+  for (const assertion of graphResult.assertions || []) {
+    if (assertion.source_chunk_id) ids.add(assertion.source_chunk_id);
+  }
+  return ids;
+}
+
+function toTraceWikiArticle(article: WikiArticleResult): Record<string, unknown> {
+  return {
+    article_id: article.article_id,
+    slug: article.slug,
+    title: article.title,
+    review_status: article.review_status,
+    confidence: article.confidence,
+    citation_coverage: article.citation_coverage,
+    statutes: article.statutes,
+    sections: article.sections,
+    issue_tags: article.issue_tags,
+    source_judgments: article.source_judgments,
+    source_chunk_ids: article.source_chunk_ids,
+    score: article.score,
+  };
+}
+
+function buildFusionContextText(
+  graphContext: string,
+  wikiArticles: WikiArticleResult[],
+  queryPlan: JudgmentQueryPlan | null,
+): string {
+  const parts = [
+    "Triad retrieval rule: wiki articles and graph paths are derived aids. Raw judgment chunks must support every legally material answer claim.",
+    `Query profile: ${queryPlan?.profile || "unknown"}`,
+  ];
+  if (wikiArticles.length > 0) {
+    parts.push("Reviewed wiki synthesis candidates:");
+    for (const article of wikiArticles.slice(0, 5)) {
+      parts.push(`- ${article.title} [${article.review_status}, citation coverage ${Math.round(article.citation_coverage * 100)}%]: ${article.summary || ""}`);
+    }
+  }
+  if (graphContext) {
+    parts.push("Graph context:");
+    parts.push(graphContext);
+  }
+  return parts.join("\n");
 }
 
 async function getConversationHistory(
@@ -1754,7 +2165,7 @@ function toTraceVectorResult(result: VectorSearchResult): Record<string, unknown
     case_reference: result.case_reference ?? null,
     fir_number: result.fir_number ?? null,
     station_code: result.station_code ?? null,
-    content_preview: trimTraceText(result.content),
+    content_preview: trimTraceText(result.content ?? ""),
   };
 }
 
@@ -1769,7 +2180,7 @@ function toTraceLexicalResult(result: LexicalSearchResult): Record<string, unkno
     case_reference: result.case_reference ?? null,
     fir_number: result.fir_number ?? null,
     station_code: result.station_code ?? null,
-    content_preview: trimTraceText(result.content),
+    content_preview: trimTraceText(result.content ?? ""),
   };
 }
 
@@ -1793,7 +2204,10 @@ function toTraceRankedChunk(chunk: RankedChunk): Record<string, unknown> {
     station_code: chunk.station_code ?? null,
     matched_case_scopes: chunk.matched_case_scopes || [],
     scope_status: chunk.scope_status || null,
-    content_preview: trimTraceText(chunk.content),
+    translation: chunk.chunk_metadata && typeof chunk.chunk_metadata === "object"
+      ? (chunk.chunk_metadata as Record<string, unknown>).translation || null
+      : null,
+    content_preview: trimTraceText(chunk.content ?? ""),
   };
 }
 
@@ -1815,11 +2229,14 @@ function toTraceFilteredChunk(
     station_code: chunk.station_code ?? null,
     matched_case_scopes: chunk.matched_case_scopes || [],
     scope_status: chunk.scope_status || null,
-    ...(includePreview ? { content_preview: trimTraceText(chunk.content) } : {}),
+    ...(includePreview ? { content_preview: trimTraceText(chunk.content ?? "") } : {}),
   };
 }
 
-function trimTraceText(text: string, maxLength: number = 280): string {
+function trimTraceText(text: string | null | undefined, maxLength: number = 280): string {
+  if (!text) {
+    return "";
+  }
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length <= maxLength) {
     return normalized;

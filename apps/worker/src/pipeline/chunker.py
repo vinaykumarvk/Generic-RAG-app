@@ -30,9 +30,16 @@ def chunk_document(document_id: str, workspace_id: str):
     with get_connection() as conn:
         with get_cursor(conn) as cur:
             cur.execute("""
-                SELECT content FROM extraction_result
-                WHERE document_id = %s AND extraction_type = 'TEXT'
-                ORDER BY created_at DESC LIMIT 1
+                SELECT extraction_id, extraction_type, content, metadata
+                FROM extraction_result
+                WHERE document_id = %s AND extraction_type IN ('TRANSLATED_TEXT', 'REDACTED_TEXT', 'TEXT')
+                ORDER BY CASE
+                           WHEN extraction_type = 'TRANSLATED_TEXT' THEN 0
+                           WHEN extraction_type = 'REDACTED_TEXT' THEN 1
+                           ELSE 2
+                         END,
+                         created_at DESC
+                LIMIT 1
             """, (document_id,))
             row = cur.fetchone()
             if not row:
@@ -48,7 +55,7 @@ def chunk_document(document_id: str, workspace_id: str):
 
             # Fetch document-level metadata for propagation to chunks
             cur.execute("""
-                SELECT category, subcategory, source_path, metadata
+                SELECT category, subcategory, source_path, metadata, extracted_metadata, language
                 FROM document WHERE document_id = %s
             """, (document_id,))
             doc_row = cur.fetchone()
@@ -80,21 +87,27 @@ def chunk_document(document_id: str, workspace_id: str):
 
     # Build chunk metadata from document-level folder metadata
     doc_metadata = {}
+    extraction_metadata = _json_obj(row.get("metadata"))
     if doc_row:
         raw_meta = doc_row.get("metadata")
-        if isinstance(raw_meta, str):
-            try:
-                doc_metadata = json.loads(raw_meta)
-            except (json.JSONDecodeError, TypeError):
-                doc_metadata = {}
-        elif isinstance(raw_meta, dict):
-            doc_metadata = raw_meta
+        doc_metadata = _json_obj(raw_meta)
+        extracted_metadata = _json_obj(doc_row.get("extracted_metadata"))
+        for key, value in extracted_metadata.items():
+            doc_metadata.setdefault(key, value)
         if doc_row.get("category"):
             doc_metadata["category"] = doc_row["category"]
         if doc_row.get("subcategory"):
             doc_metadata["subcategory"] = doc_row["subcategory"]
         if doc_row.get("source_path"):
             doc_metadata["source_path"] = doc_row["source_path"]
+        if doc_row.get("language"):
+            doc_metadata.setdefault("source_language", doc_row["language"])
+    doc_metadata["text_artifact_type"] = row.get("extraction_type")
+    if row.get("extraction_id"):
+        doc_metadata["text_extraction_id"] = str(row["extraction_id"])
+    if extraction_metadata.get("translation"):
+        doc_metadata["translation"] = extraction_metadata["translation"]
+    chunk_legal_metadata = _build_chunk_legal_metadata(doc_metadata, extraction_metadata)
     target_tokens = config.CHUNK_SIZE_TOKENS
     overlap_ratio = config.CHUNK_OVERLAP
 
@@ -132,7 +145,7 @@ def chunk_document(document_id: str, workspace_id: str):
                     document_id, workspace_id, i, chunk["content"], chunk["type"],
                     len(chunk["content"]) // CHARS_PER_TOKEN,
                     chunk.get("page_start"), chunk.get("page_end"),
-                    chunk.get("heading_path"), json.dumps(doc_metadata),
+                    chunk.get("heading_path"), json.dumps(doc_metadata), json.dumps(chunk_legal_metadata),
                 )
                 for i, chunk in enumerate(chunks)
             ]
@@ -140,7 +153,7 @@ def chunk_document(document_id: str, workspace_id: str):
                 execute_values(
                     cur,
                     """INSERT INTO chunk (document_id, workspace_id, chunk_index, content, chunk_type,
-                                          token_count, page_start, page_end, heading_path, metadata)
+                                          token_count, page_start, page_end, heading_path, metadata, legal_metadata)
                        VALUES %s""",
                     rows,
                     page_size=500,
@@ -152,6 +165,51 @@ def chunk_document(document_id: str, workspace_id: str):
             """, (len(chunks), document_id))
 
     logger.info(f"Document {document_id} chunked: {len(chunks)} chunks")
+
+
+def _json_obj(value) -> dict:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    return {}
+
+
+def _build_chunk_legal_metadata(doc_metadata: dict, extraction_metadata: dict) -> dict:
+    district = doc_metadata.get("district") if isinstance(doc_metadata.get("district"), dict) else {}
+    redaction = doc_metadata.get("redaction") if isinstance(doc_metadata.get("redaction"), dict) else {}
+    translation = extraction_metadata.get("translation") or doc_metadata.get("translation") or {}
+    if not isinstance(translation, dict):
+        translation = {}
+
+    legal_metadata = {
+        "text_artifact_type": doc_metadata.get("text_artifact_type"),
+        "cnr": district.get("cnr") or doc_metadata.get("cnr"),
+        "state_code": district.get("state_code") or doc_metadata.get("state_code"),
+        "state": district.get("state") or doc_metadata.get("state"),
+        "district_code": district.get("district_code") or doc_metadata.get("district_code"),
+        "district": district.get("district") or doc_metadata.get("district_name"),
+        "court_level": district.get("court_level") or doc_metadata.get("court_level"),
+        "court_name": district.get("court_name") or doc_metadata.get("court_name"),
+        "statutes": district.get("statutes") or doc_metadata.get("statutes"),
+        "sections": district.get("sections") or doc_metadata.get("sections"),
+        "disposition": district.get("disposition") or doc_metadata.get("disposition"),
+        "source_name": district.get("source_name") or doc_metadata.get("source_name"),
+        "license_classification": district.get("license_classification") or doc_metadata.get("license_classification"),
+        "commercial_safe": district.get("commercial_safe", doc_metadata.get("commercial_safe")),
+        "source_language": translation.get("source_language") or doc_metadata.get("source_language"),
+        "target_language": translation.get("target_language"),
+        "translation_status": translation.get("qa_status") or translation.get("translation_status"),
+        "translation_provider": translation.get("provider"),
+        "translation_confidence": translation.get("translation_confidence"),
+        "glossary_version": translation.get("glossary_version"),
+        "redaction_status": redaction.get("redaction_status") or doc_metadata.get("redaction_status"),
+    }
+    return {key: value for key, value in legal_metadata.items() if value is not None}
 
 
 def _build_table_chunks(table_extractions: list, target_chars: int) -> list:

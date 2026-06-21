@@ -29,7 +29,7 @@ export function createRagRoutes(app: FastifyInstance, deps: RagRouteDeps) {
         question: string;
         conversation_id?: string;
         preset?: "concise" | "balanced" | "detailed";
-        mode?: "hybrid" | "vector_only" | "metadata_only" | "graph_only";
+        mode?: "hybrid" | "vector_only" | "metadata_only" | "graph_only" | "wiki_only";
         skip_cache?: boolean;
         regenerate?: boolean;
         filters?: {
@@ -42,7 +42,43 @@ export function createRagRoutes(app: FastifyInstance, deps: RagRouteDeps) {
           fir_number?: string;
           station_code?: string;
           language?: string;
+          source_language?: string;
+          target_language?: string;
+          translation_status?: string;
           sensitivity_levels?: string[];
+          retrieval_profile?: string;
+          judgment_id?: string;
+          court_code?: string;
+          court_codes?: string[];
+          statute?: string;
+          statutes?: string[];
+          section?: string;
+          sections?: string[];
+          outcome?: string;
+          outcomes?: string[];
+          disposition?: string;
+          dispositions?: string[];
+          state?: string;
+          states?: string[];
+          state_name?: string;
+          state_names?: string[];
+          state_code?: string | number;
+          state_codes?: Array<string | number>;
+          district?: string;
+          districts?: string[];
+          district_name?: string;
+          district_names?: string[];
+          district_code?: string | number;
+          district_codes?: Array<string | number>;
+          court_level?: string;
+          court_levels?: string[];
+          source_name?: string;
+          source_names?: string[];
+          license_classification?: string;
+          license_classifications?: string[];
+          commercial_safe?: boolean | string;
+          redaction_status?: string;
+          redaction_statuses?: string[];
         };
       };
 
@@ -75,7 +111,43 @@ export function createRagRoutes(app: FastifyInstance, deps: RagRouteDeps) {
               fir_number: filters.fir_number,
               station_code: filters.station_code,
               language: filters.language,
+              source_language: filters.source_language,
+              target_language: filters.target_language,
+              translation_status: filters.translation_status,
               sensitivity_levels: filters.sensitivity_levels,
+              retrieval_profile: filters.retrieval_profile,
+              judgmentId: filters.judgment_id,
+              court_code: filters.court_code,
+              court_codes: filters.court_codes,
+              statute: filters.statute,
+              statutes: filters.statutes,
+              section: filters.section,
+              sections: filters.sections,
+              outcome: filters.outcome,
+              outcomes: filters.outcomes,
+              disposition: filters.disposition,
+              dispositions: filters.dispositions,
+              state: filters.state,
+              states: filters.states,
+              state_name: filters.state_name,
+              state_names: filters.state_names,
+              state_code: filters.state_code,
+              state_codes: filters.state_codes,
+              district: filters.district,
+              districts: filters.districts,
+              district_name: filters.district_name,
+              district_names: filters.district_names,
+              district_code: filters.district_code,
+              district_codes: filters.district_codes,
+              court_level: filters.court_level,
+              court_levels: filters.court_levels,
+              source_name: filters.source_name,
+              source_names: filters.source_names,
+              license_classification: filters.license_classification,
+              license_classifications: filters.license_classifications,
+              commercial_safe: filters.commercial_safe,
+              redaction_status: filters.redaction_status,
+              redaction_statuses: filters.redaction_statuses,
             } : undefined,
           },
         );
@@ -120,7 +192,7 @@ export function createRagRoutes(app: FastifyInstance, deps: RagRouteDeps) {
             conversationId: conversation_id,
             userId: request.authUser!.userId,
             preset: (preset || "balanced") as "concise" | "balanced" | "detailed",
-            mode: (mode || "hybrid") as "hybrid" | "vector_only" | "metadata_only" | "graph_only",
+            mode: (mode || "hybrid") as "hybrid" | "vector_only" | "metadata_only" | "graph_only" | "wiki_only",
             userClearance: (request.authUser as { sensitivityClearance?: string })?.sensitivityClearance || "INTERNAL",
             userType: request.authUser!.userType,
             filters: filters as PipelineFilters | undefined,
@@ -134,6 +206,38 @@ export function createRagRoutes(app: FastifyInstance, deps: RagRouteDeps) {
       }
 
       reply.raw.end();
+    }
+  );
+
+  // Retrieval profile discovery for judgment/wiki-aware workspaces.
+  app.get<{ Params: { wid: string } }>(
+    "/api/v1/workspaces/:wid/retrieval-profiles",
+    async (request, reply) => {
+      const { wid } = request.params;
+      const workspace = await queryFn(
+        `SELECT settings FROM workspace WHERE workspace_id = $1`,
+        [wid]
+      );
+      if (workspace.rows.length === 0) return send404(reply, "Workspace not found");
+
+      const settings = workspace.rows[0].settings || {};
+      const wikiCount = await queryFn(
+        `SELECT count(*)::int as approved_count
+         FROM legal_wiki_article
+         WHERE workspace_id = $1 AND review_status = 'approved'`,
+        [wid]
+      );
+
+      return {
+        workspaceKind: settings.workspaceKind || "general",
+        defaultRetrievalProfile: settings.defaultRetrievalProfile || "balanced",
+        retrievalProfiles: settings.retrievalProfiles || {},
+        wiki: {
+          enabled: Number(wikiCount.rows[0]?.approved_count || 0) > 0,
+          approvedArticleCount: Number(wikiCount.rows[0]?.approved_count || 0),
+          availableModes: ["hybrid", "graph_only", "vector_only", "metadata_only", "wiki_only"],
+        },
+      };
     }
   );
 
@@ -183,7 +287,13 @@ export function createRagRoutes(app: FastifyInstance, deps: RagRouteDeps) {
                   'document_title', c.document_title,
                   'page_number', c.page_number,
                   'excerpt', c.excerpt,
-                  'relevance_score', c.relevance_score
+                  'relevance_score', c.relevance_score,
+                  'source_language', c.source_language,
+                  'target_language', c.target_language,
+                  'translation_status', c.translation_status,
+                  'translated_excerpt', c.translated_excerpt,
+                  'original_excerpt', c.original_excerpt,
+                  'translation_metadata', c.translation_metadata
                 ) ORDER BY c.citation_index)
                 FROM citation c WHERE c.message_id = m.message_id) as citations
          FROM message m
@@ -237,7 +347,13 @@ export function createRagRoutes(app: FastifyInstance, deps: RagRouteDeps) {
                 'document_title', c.document_title,
                 'page_number', c.page_number,
                 'excerpt', c.excerpt,
-                'relevance_score', c.relevance_score
+                'relevance_score', c.relevance_score,
+                'source_language', c.source_language,
+                'target_language', c.target_language,
+                'translation_status', c.translation_status,
+                'translated_excerpt', c.translated_excerpt,
+                'original_excerpt', c.original_excerpt,
+                'translation_metadata', c.translation_metadata
               ) ORDER BY c.citation_index)
               FROM citation c
               WHERE c.message_id = m.message_id
@@ -543,6 +659,7 @@ export function createRagRoutes(app: FastifyInstance, deps: RagRouteDeps) {
 type PipelineFilters = {
   categories?: string[];
   documentIds?: string[];
+  document_ids?: string[];
   date_from?: string;
   date_to?: string;
   org_unit_id?: string;
@@ -551,4 +668,16 @@ type PipelineFilters = {
   station_code?: string;
   language?: string;
   sensitivity_levels?: string[];
+  retrieval_profile?: string;
+  judgmentId?: string;
+  judgmentIds?: string[];
+  canonical_judgment_id?: string;
+  court_code?: string;
+  court_codes?: string[];
+  statute?: string;
+  statutes?: string[];
+  section?: string;
+  sections?: string[];
+  outcome?: string;
+  outcomes?: string[];
 };

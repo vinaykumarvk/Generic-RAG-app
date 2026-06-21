@@ -25,6 +25,12 @@ export interface GeneratedAnswer {
     page_number: number | null;
     excerpt: string;
     relevance_score: number;
+    source_language?: string | null;
+    target_language?: string | null;
+    translation_status?: string | null;
+    translated_excerpt?: string | null;
+    original_excerpt?: string | null;
+    translation_metadata?: Record<string, unknown>;
   }>;
   followUpQuestions: string[];
   provider: string;
@@ -82,6 +88,11 @@ export async function generateAnswer(
     if (chunk.fir_number) sourceParts.push(`FIR ${chunk.fir_number}`);
     if (chunk.scope_status === "MATCH") sourceParts.push("Scope match");
     if (chunk.scope_status === "UNKNOWN") sourceParts.push("Scope unresolved");
+    const translation = getTranslationInfo(chunk);
+    if (translation.sourceLanguage && translation.targetLanguage && translation.sourceLanguage !== translation.targetLanguage) {
+      sourceParts.push(`Translated ${translation.sourceLanguage} to ${translation.targetLanguage}`);
+      if (translation.status) sourceParts.push(`Translation ${translation.status}`);
+    }
     return {
       chunk,
       index: i + 1,
@@ -124,6 +135,11 @@ RULES:
 - Always cite your sources using [1], [2], etc. notation matching the chunk indices below.
 - If the context does not contain enough information to answer, say so clearly.
 - Do not make up information not present in the context.
+- For judgment/legal questions, structure the answer with these sections when relevant: Reviewed position, What courts relied on, Why the State/police succeeded or failed, Source judgments, Limits.
+- Treat wiki articles and knowledge-graph paths as derived aids. Do not present unreviewed wiki or inferred graph claims as final legal conclusions unless raw judgment chunks independently support them.
+- Officer-facing recommendations must be framed as lawful investigation quality, procedural compliance, and evidence reliability. Do not frame advice as conviction optimization.
+- Redact or avoid victim/minor identity and unnecessary sexual-offence detail unless the provided context explicitly indicates authorized disclosure.
+- For translated district-court chunks, answer from the English translation but keep citations tied to the original document and mention uncertainty when translation status is not approved.
 - Keep your answer within approximately ${limits.words} words.
 - ${limits.format}
 - At the very end, after your answer, add a line "FOLLOW_UP_QUESTIONS:" followed by 2-3 concise follow-up questions the user might ask, one per line.${scopeInstruction}`;
@@ -185,6 +201,7 @@ RULES:
     .slice(0, limits.maxCitations)
     .map((i) => {
       const chunk = chunks[i - 1];
+      const translation = getTranslationInfo(chunk);
       return {
         citation_index: i,
         chunk_id: chunk.chunk_id,
@@ -193,6 +210,12 @@ RULES:
         page_number: chunk.page_start,
         excerpt: chunk.content.slice(0, 300),
         relevance_score: chunk.score,
+        source_language: translation.sourceLanguage,
+        target_language: translation.targetLanguage,
+        translation_status: translation.status,
+        translated_excerpt: translation.isTranslated ? chunk.content.slice(0, 300) : null,
+        original_excerpt: translation.originalExcerpt || null,
+        translation_metadata: translation.metadata,
       };
     });
 
@@ -211,6 +234,44 @@ RULES:
 
 function looksLikeComparisonQuery(query: string): boolean {
   return /\b(compare|comparison|difference|differences|different|versus|vs\.?|contrast|similarit(?:y|ies))\b/i.test(query);
+}
+
+function getTranslationInfo(chunk: RankedChunk): {
+  sourceLanguage: string | null;
+  targetLanguage: string | null;
+  status: string | null;
+  originalExcerpt: string | null;
+  metadata: Record<string, unknown>;
+  isTranslated: boolean;
+} {
+  const chunkMetadata = asRecord(chunk.chunk_metadata);
+  const legalMetadata = asRecord(chunk.chunk_legal_metadata);
+  const translation = asRecord(chunkMetadata.translation);
+  const sourceLanguage = stringValue(translation.source_language) || stringValue(legalMetadata.source_language);
+  const targetLanguage = stringValue(translation.target_language) || stringValue(legalMetadata.target_language);
+  const status = stringValue(translation.qa_status)
+    || stringValue(translation.translation_status)
+    || stringValue(legalMetadata.translation_status);
+  const metadata = Object.keys(translation).length > 0 ? translation : legalMetadata;
+
+  return {
+    sourceLanguage,
+    targetLanguage,
+    status,
+    originalExcerpt: stringValue(translation.original_excerpt),
+    metadata,
+    isTranslated: Boolean(sourceLanguage && targetLanguage && sourceLanguage !== targetLanguage),
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function buildContextBlock(
