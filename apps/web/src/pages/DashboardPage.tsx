@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useWorkspaces, useCreateWorkspace } from "@/hooks/useWorkspaces";
 import { Plus, FolderOpen, FileText, Users } from "lucide-react";
@@ -11,6 +11,14 @@ export function DashboardPage() {
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
+
+  // If the user can access exactly one workspace, skip the dashboard and land
+  // directly on its query page (avoids the extra workspace -> query clicks).
+  useEffect(() => {
+    if (workspaces && workspaces.length === 1) {
+      navigate(`/workspace/${workspaces[0].workspace_id}/query`, { replace: true });
+    }
+  }, [workspaces, navigate]);
 
   const handleCreate = async () => {
     if (!name || !slug) return;

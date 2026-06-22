@@ -181,8 +181,9 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
     const textarea = textareaRef.current;
     if (textarea) {
       textarea.style.height = "auto";
-      const maxHeight = 5 * 24; // ~5 lines
-      textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+      const minHeight = 3 * 24; // ~3 lines (default size)
+      const maxHeight = 10 * 24; // grow up to ~10 lines, then scroll
+      textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight)}px`;
     }
   }, []);
 
@@ -711,7 +712,7 @@ export function ChatPanel({ workspaceId, conversationId, onConversationCreated }
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Ask a question about your documents..."
-            rows={1}
+            rows={3}
             className="flex-1 px-4 py-2 border border-skin rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none text-sm bg-surface text-skin-base resize-none overflow-hidden"
             disabled={queryMutation.isPending}
           />
