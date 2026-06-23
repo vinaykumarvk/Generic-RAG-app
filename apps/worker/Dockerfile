@@ -1,5 +1,8 @@
 # IntelliRAG Python Worker — ingestion pipeline
-FROM python:3.11-slim
+# Pinned to bookworm (Debian 12): Playwright 1.48 supports it, so
+# `playwright install-deps chromium` resolves correct apt packages.
+# (bare python:3.11-slim now tracks trixie/13, which Playwright can't dep-install.)
+FROM python:3.11-slim-bookworm
 
 # Install system dependencies (OCR + legacy DOC text extraction)
 RUN apt-get update && apt-get install -y --no-install-recommends \
