@@ -15,10 +15,11 @@ The default production strategy is **human-in-the-loop CAPTCHA handling with str
 | Authorization date | 2026-06-23 |
 | Scope | district-court eCourts CNR search + order/judgement PDF download |
 | Feature flag (default OFF) | `ECOURTS_COMMERCIAL_CAPTCHA_SOLVER_ENABLED` |
-| Counsel attestation | ☐ PENDING — counsel sign-off to be recorded here before production enablement |
-| Data-processing review | ☐ PENDING — captcha images transit a third-party vendor; complete vendor DPA before enablement |
+| Counsel attestation | ⚠ NOT OBTAINED — **OVERRIDDEN by owner (vinaykumarvk) on 2026-06-23**: owner elected to enable Mode 4 in production without counsel sign-off, accepting the legal/operational risk. Counsel review still outstanding and should be completed retroactively. |
+| Data-processing review | ⚠ NOT OBTAINED — overridden by owner under the same decision; vendor DPA for the third-party CAPTCHA solver still outstanding. |
+| Production enablement | Mode 4 enabled in `police-cases-kb-worker` (policing-apps) on owner's instruction, 2026-06-23. |
 
-> Engineering note: this revision was recorded on owner authorization. The counsel attestation and data-processing review boxes above MUST be signed before `ECOURTS_COMMERCIAL_CAPTCHA_SOLVER_ENABLED=true` is set in any production deployment.
+> Engineering note: the counsel attestation and data-processing review were **not** completed; the project owner explicitly overrode these gates to enable `ECOURTS_COMMERCIAL_CAPTCHA_SOLVER_ENABLED=true` in production on 2026-06-23. This record preserves that this was an owner risk-acceptance, not a counsel approval. Retain throttling, stop conditions, and redaction at all times; complete counsel + DPA review as soon as possible.
 
 ## Why This Exists
 
