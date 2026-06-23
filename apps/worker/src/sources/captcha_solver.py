@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
@@ -127,6 +128,67 @@ class TwoCaptchaSolver:
         raise CaptchaSolveError("Solver timed out waiting for CAPTCHA result")
 
 
+def _clean_captcha_text(text: str) -> str:
+    """Reduce OCR output to the captcha charset (alphanumeric, no whitespace)."""
+
+    return re.sub(r"[^A-Za-z0-9]", "", text or "")
+
+
+def _guess_image_mime(content: bytes) -> str:
+    if content[:8].startswith(b"\x89PNG"):
+        return "image/png"
+    if content[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if content[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    return "image/png"
+
+
+class DocumentAiSolver:
+    """Solve captchas by OCR'ing the image with the worker's Google Document AI processor.
+
+    Reuses the already-configured Document AI client/processor/credentials
+    (see pipeline/ocr_provider.py) — no extra vendor or key. Document AI is
+    general OCR, not captcha-tuned, so accuracy varies; the caller retries on
+    misses (ECOURTS_CAPTCHA_MAX_ATTEMPTS).
+    """
+
+    provider = "documentai"
+
+    def __init__(self, cost_units: float | None = None):
+        self.cost_units = config.CAPTCHA_SOLVER_COST_UNITS if cost_units is None else cost_units
+
+    def solve(self, image_bytes: bytes, *, hint: str = "") -> CaptchaSolution:
+        if not image_bytes:
+            raise CaptchaSolveError("Empty CAPTCHA image supplied to solver")
+        if not (config.DOCUMENT_AI_PROJECT_ID and config.DOCUMENT_AI_PROCESSOR_ID):
+            raise CaptchaUnavailableError("Document AI is not configured (DOCUMENT_AI_PROJECT_ID/PROCESSOR_ID)")
+        try:
+            from ..pipeline.ocr_provider import (
+                _get_document_ai_client,
+                _get_documentai_module,
+                _get_processor_name,
+            )
+        except Exception as exc:  # pragma: no cover - import guard
+            raise CaptchaUnavailableError(f"Document AI OCR is unavailable: {exc}") from exc
+
+        documentai = _get_documentai_module()
+        client = _get_document_ai_client()
+        request = documentai.ProcessRequest(
+            name=_get_processor_name(client),
+            raw_document=documentai.RawDocument(content=image_bytes, mime_type=_guess_image_mime(image_bytes)),
+        )
+        try:
+            result = client.process_document(request=request)
+        except Exception as exc:
+            raise CaptchaSolveError(f"Document AI process_document failed: {exc}") from exc
+
+        text = _clean_captcha_text(getattr(result.document, "text", "") or "")
+        if not text:
+            raise CaptchaSolveError("Document AI returned no readable captcha text")
+        return CaptchaSolution(text=text, provider=self.provider, cost_units=self.cost_units)
+
+
 def get_captcha_solver() -> CaptchaSolver:
     """Resolve the configured solver, honoring the default-off feature flag."""
 
@@ -136,5 +198,7 @@ def get_captcha_solver() -> CaptchaSolver:
     if provider in {"twocaptcha", "2captcha", "anticaptcha", "anti-captcha"}:
         # 2Captcha and Anti-Captcha both expose the in.php/res.php contract.
         return TwoCaptchaSolver()
+    if provider in {"documentai", "document_ai", "docai", "google_documentai"}:
+        return DocumentAiSolver()
     logger.warning("Unknown CAPTCHA_SOLVER_PROVIDER=%s; falling back to disabled solver", provider)
     return DisabledSolver()

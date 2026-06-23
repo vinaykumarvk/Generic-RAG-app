@@ -8,8 +8,12 @@ from src.sources.captcha_solver import (  # noqa: E402
     CaptchaSolution,
     CaptchaUnavailableError,
     DisabledSolver,
+    DocumentAiSolver,
+    _clean_captcha_text,
+    _guess_image_mime,
     get_captcha_solver,
 )
+from src.sources import captcha_solver as captcha_solver_module  # noqa: E402
 from src.sources.ecourts_district import ECourtsClient  # noqa: E402
 from src.sources.ecourts_parser import (  # noqa: E402
     extract_hidden_inputs,
@@ -69,6 +73,27 @@ class CaptchaSolverGatingTests(unittest.TestCase):
     def test_get_captcha_solver_disabled_by_default(self):
         # Feature flag defaults to off, so the resolver must refuse automation.
         self.assertIsInstance(get_captcha_solver(), DisabledSolver)
+
+    def test_clean_captcha_text_strips_non_alnum(self):
+        self.assertEqual(_clean_captcha_text(" a B 7\nx9 "), "aB7x9")
+        self.assertEqual(_clean_captcha_text("!@#"), "")
+
+    def test_guess_image_mime(self):
+        self.assertEqual(_guess_image_mime(b"\x89PNG\r\n\x1a\n...."), "image/png")
+        self.assertEqual(_guess_image_mime(b"\xff\xd8\xff\xe0"), "image/jpeg")
+        self.assertEqual(_guess_image_mime(b"random"), "image/png")
+
+    def test_get_captcha_solver_documentai_when_enabled(self):
+        cfg = captcha_solver_module.config
+        orig_enabled = cfg.ECOURTS_COMMERCIAL_CAPTCHA_SOLVER_ENABLED
+        orig_provider = cfg.CAPTCHA_SOLVER_PROVIDER
+        try:
+            cfg.ECOURTS_COMMERCIAL_CAPTCHA_SOLVER_ENABLED = True
+            cfg.CAPTCHA_SOLVER_PROVIDER = "documentai"
+            self.assertIsInstance(get_captcha_solver(), DocumentAiSolver)
+        finally:
+            cfg.ECOURTS_COMMERCIAL_CAPTCHA_SOLVER_ENABLED = orig_enabled
+            cfg.CAPTCHA_SOLVER_PROVIDER = orig_provider
 
 
 class ECourtsClientRoutingTests(unittest.TestCase):
