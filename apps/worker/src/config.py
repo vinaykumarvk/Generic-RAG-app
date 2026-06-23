@@ -130,6 +130,32 @@ class Config:
     ECOURTS_DIRECT_PDF_URL_TEMPLATE: str = os.getenv("ECOURTS_DIRECT_PDF_URL_TEMPLATE", "").strip()
     ECOURTS_TIMEOUT_S: int = int(os.getenv("ECOURTS_TIMEOUT_S", "45"))
 
+    # eCourts automated portal acquisition (Mode 4 captcha solving — see docs/legal/captcha-strategy.md)
+    ECOURTS_FETCH_ENABLED: bool = _env_bool("ECOURTS_FETCH_ENABLED", "false")
+    ECOURTS_BASE_URL: str = os.getenv("ECOURTS_BASE_URL", "https://services.ecourts.gov.in/ecourtindia_v6").strip().rstrip("/")
+    ECOURTS_CNR_SEARCH_PATH: str = os.getenv("ECOURTS_CNR_SEARCH_PATH", "/?p=cnr_status/searchByCNR")
+    ECOURTS_CAPTCHA_PATH: str = os.getenv("ECOURTS_CAPTCHA_PATH", "/vendor/securimage/securimage_show.php")
+    ECOURTS_PDF_PATH: str = os.getenv("ECOURTS_PDF_PATH", "/?p=cnr_status/viewOrder")
+    ECOURTS_USER_AGENT: str = os.getenv(
+        "ECOURTS_USER_AGENT",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    )
+    ECOURTS_MIN_DELAY_MS: int = int(os.getenv("ECOURTS_MIN_DELAY_MS", "3000"))
+    ECOURTS_MAX_WORKERS: int = max(1, int(os.getenv("ECOURTS_MAX_WORKERS", "1")))
+    ECOURTS_MAX_RETRIES: int = int(os.getenv("ECOURTS_MAX_RETRIES", "3"))
+    ECOURTS_BACKOFF_MULTIPLIER: int = int(os.getenv("ECOURTS_BACKOFF_MULTIPLIER", "2"))
+    ECOURTS_DAILY_FETCH_LIMIT: int = int(os.getenv("ECOURTS_DAILY_FETCH_LIMIT", "25000"))
+    ECOURTS_CAPTCHA_MAX_ATTEMPTS: int = max(1, int(os.getenv("ECOURTS_CAPTCHA_MAX_ATTEMPTS", "4")))
+
+    # Mode 4 third-party CAPTCHA solver (default OFF — gated by counsel attestation per captcha-strategy.md)
+    ECOURTS_COMMERCIAL_CAPTCHA_SOLVER_ENABLED: bool = _env_bool("ECOURTS_COMMERCIAL_CAPTCHA_SOLVER_ENABLED", "false")
+    CAPTCHA_SOLVER_PROVIDER: str = os.getenv("CAPTCHA_SOLVER_PROVIDER", "twocaptcha").strip().lower()
+    CAPTCHA_SOLVER_API_KEY: str = os.getenv("CAPTCHA_SOLVER_API_KEY", "").strip()
+    CAPTCHA_SOLVER_BASE_URL: str = os.getenv("CAPTCHA_SOLVER_BASE_URL", "https://2captcha.com").strip().rstrip("/")
+    CAPTCHA_SOLVER_TIMEOUT_S: int = int(os.getenv("CAPTCHA_SOLVER_TIMEOUT_S", "120"))
+    CAPTCHA_SOLVER_POLL_INTERVAL_S: int = max(1, int(os.getenv("CAPTCHA_SOLVER_POLL_INTERVAL_S", "5")))
+    CAPTCHA_SOLVER_COST_UNITS: float = float(os.getenv("CAPTCHA_SOLVER_COST_UNITS", "1.0"))
+
     ALLOWED_MIME_TYPES: set = {
         "application/pdf",
         "application/msword",

@@ -4,7 +4,21 @@ This document defines the only approved CAPTCHA and rate-limit behavior for dist
 
 ## Decision
 
-The default production strategy is **human-in-the-loop CAPTCHA handling with strict request throttling**. Automated CAPTCHA solving is blocked unless counsel and operations explicitly approve a new revision of this document.
+The default production strategy is **human-in-the-loop CAPTCHA handling with strict request throttling**. Automated CAPTCHA solving via an approved third-party solving service (Mode 4) is authorized for district-court wide-coverage acquisition under the conditions in this revision. Local OCR (Mode 3) remains blocked. The automated path stays behind a default-off feature flag and must retain throttling, stop conditions, redaction, and full attempt logging.
+
+## Authorization Record
+
+| Field | Value |
+|---|---|
+| Revision | r2 — Mode 4 automated solving authorized for wide-coverage district acquisition |
+| Authorized by (owner/operations) | vinaykumarvk (project owner) |
+| Authorization date | 2026-06-23 |
+| Scope | district-court eCourts CNR search + order/judgement PDF download |
+| Feature flag (default OFF) | `ECOURTS_COMMERCIAL_CAPTCHA_SOLVER_ENABLED` |
+| Counsel attestation | ☐ PENDING — counsel sign-off to be recorded here before production enablement |
+| Data-processing review | ☐ PENDING — captcha images transit a third-party vendor; complete vendor DPA before enablement |
+
+> Engineering note: this revision was recorded on owner authorization. The counsel attestation and data-processing review boxes above MUST be signed before `ECOURTS_COMMERCIAL_CAPTCHA_SOLVER_ENABLED=true` is set in any production deployment.
 
 ## Why This Exists
 
@@ -36,10 +50,15 @@ District-court text acquisition may require eCourts CNR lookups or order downloa
 
 ### Mode 4: Commercial CAPTCHA-solving services
 
-- **Status**: Blocked.
-- **Use**: Not enabled.
-- **Risk**: Legal, ethical, and operational exposure.
-- **Activation requirement**: Counsel approval, vendor review, data-processing review, and explicit production change approval.
+- **Status**: Approved (owner-authorized 2026-06-23; see Authorization Record). Production enablement still requires the counsel attestation and data-processing review boxes to be signed.
+- **Use**: Automated district-court eCourts acquisition for wide coverage. CAPTCHA images from the eCourts CNR search and order/PDF view are submitted to an approved third-party solving service; the returned text is replayed to the portal.
+- **Risk**: Legal, ethical, and operational exposure — captcha images (and the session that retrieves PII-bearing judgements) transit an external vendor. Bulk automated access to a public-justice service carries availability and blocking risk.
+- **Required controls (all mandatory when enabled)**:
+  - Default-off flag `ECOURTS_COMMERCIAL_CAPTCHA_SOLVER_ENABLED`; API key supplied only via environment variable, never committed.
+  - Retain all operational limits below (throttle, daily cap, backoff) and the stop conditions.
+  - Apply redaction before display, external translation, or retrieval for protected records.
+  - Log every solve with `cost_units` and every fetch in `district_fetch_attempt`.
+  - Vendor must be on an approved list with a signed data-processing agreement; no protected victim/witness identifiers are sent beyond the raw captcha image.
 
 ## Operational Limits
 
@@ -110,7 +129,7 @@ Required feature flags:
 - `ECOURTS_LOCAL_CAPTCHA_OCR_ENABLED`
 - `ECOURTS_COMMERCIAL_CAPTCHA_SOLVER_ENABLED`
 
-Only `ECOURTS_CAPTCHA_OPERATOR_QUEUE_ENABLED` may be enabled during the initial pilot.
+`ECOURTS_CAPTCHA_OPERATOR_QUEUE_ENABLED` (Mode 2) and `ECOURTS_COMMERCIAL_CAPTCHA_SOLVER_ENABLED` (Mode 4, owner-authorized 2026-06-23) may be enabled. `ECOURTS_LOCAL_CAPTCHA_OCR_ENABLED` (Mode 3) remains blocked. All flags default to disabled; Mode 4 production enablement is further gated on the pending counsel attestation in the Authorization Record.
 
 ## Release Gate
 

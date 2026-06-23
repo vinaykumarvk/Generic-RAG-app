@@ -5,6 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.pipeline.redactor import (  # noqa: E402
+    derive_protected_flags,
     extract_sensitive_flags,
     redact_text,
     requires_protected_redaction,
@@ -39,6 +40,22 @@ class DistrictRedactorTests(unittest.TestCase):
 
     def test_non_sensitive_metadata_does_not_require_protected_redaction(self):
         self.assertFalse(requires_protected_redaction(["public_record"]))
+
+    def test_derive_protected_flags_from_offence_categories(self):
+        self.assertIn("minor_identity", derive_protected_flags(["child_sexual_offence"]))
+        self.assertIn("sexual_offence_detail", derive_protected_flags(["POCSO Act"]))
+        self.assertIn("victim_identity", derive_protected_flags(["rape"]))
+        self.assertEqual(derive_protected_flags(["theft"]), [])
+        self.assertEqual(derive_protected_flags(None), [])
+
+    def test_pocso_case_requires_protected_redaction_without_explicit_flags(self):
+        # A POCSO judgment carrying only offence_categories (no sensitive_data_flags)
+        # must still be treated as protected — the release-gate control.
+        flags = extract_sensitive_flags(
+            {"district": {"offence_categories": ["child_sexual_offence"], "sensitive_data_flags": []}},
+        )
+        self.assertTrue(requires_protected_redaction(flags))
+        self.assertIn("minor_identity", flags)
 
 
 if __name__ == "__main__":

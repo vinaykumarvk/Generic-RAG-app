@@ -21,6 +21,29 @@ PROTECTED_FLAGS = {
     "protected_witness",
 }
 
+# Offence-category keywords that imply protected handling even when a case row
+# carries no explicit sensitive_data_flags. Matched as substrings (lower-cased)
+# so "child_sexual_offence", "POCSO", "minor girl", etc. all resolve. This is the
+# POCSO/rape/minor release-gate control: such judgments must not pass redaction
+# as "not_required" purely because no PII pattern happened to match.
+OFFENCE_PROTECTED_FLAGS = (
+    (("child_sexual_offence", "pocso", "child victim", "minor"), ("minor_identity", "sexual_offence_detail")),
+    (("rape", "sexual_assault", "sexual_offence", "prosecutrix", "molest"), ("victim_identity", "sexual_offence_detail")),
+    (("juvenile", "juvenile_justice", "jj act"), ("minor_identity",)),
+    (("sealed", "in_camera", "in camera"), ("sealed_record",)),
+)
+
+
+def derive_protected_flags(offence_categories: list[str] | tuple[str, ...] | set[str] | None) -> list[str]:
+    """Map offence categories to protected redaction flags (substring match)."""
+
+    haystack = [str(category).strip().lower() for category in (offence_categories or []) if str(category).strip()]
+    flags: set[str] = set()
+    for keywords, mapped in OFFENCE_PROTECTED_FLAGS:
+        if any(keyword in category for keyword in keywords for category in haystack):
+            flags.update(mapped)
+    return sorted(flags)
+
 REDACTION_RULES = (
     ("email", re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)),
     ("phone_number", re.compile(r"(?<!\d)(?:\+?91[-\s]?)?[6-9]\d{9}(?!\d)")),
@@ -68,6 +91,7 @@ def extract_sensitive_flags(*payloads: Any) -> list[str]:
     """Extract sensitive flags from nested metadata payloads."""
 
     flags: list[str] = []
+    offences: list[str] = []
     for payload in payloads:
         if isinstance(payload, str):
             try:
@@ -77,12 +101,13 @@ def extract_sensitive_flags(*payloads: Any) -> list[str]:
         if not isinstance(payload, dict):
             continue
         flags.extend(_as_list(payload.get("sensitive_data_flags")))
-        judgment = payload.get("judgment")
-        if isinstance(judgment, dict):
-            flags.extend(_as_list(judgment.get("sensitive_data_flags")))
-        district = payload.get("district")
-        if isinstance(district, dict):
-            flags.extend(_as_list(district.get("sensitive_data_flags")))
+        offences.extend(_as_list(payload.get("offence_categories")))
+        for nested_key in ("judgment", "district"):
+            nested = payload.get(nested_key)
+            if isinstance(nested, dict):
+                flags.extend(_as_list(nested.get("sensitive_data_flags")))
+                offences.extend(_as_list(nested.get("offence_categories")))
+    flags.extend(derive_protected_flags(offences))
     return sorted(set(flag for flag in flags if flag))
 
 

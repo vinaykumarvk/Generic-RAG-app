@@ -103,8 +103,8 @@ Every normalized district source row must carry:
 
 Before Phase 3 text acquisition can run against production-scale sources:
 
-- eCourts CAPTCHA and rate-limit strategy must be approved.
+- eCourts CAPTCHA and rate-limit strategy must be approved. **Status: Mode 4 (third-party solver) authorized 2026-06-23 (`docs/legal/captcha-strategy.md` r2); automated path stays behind `ECOURTS_COMMERCIAL_CAPTCHA_SOLVER_ENABLED` (default off) and the counsel attestation in that doc must be signed before production enablement.**
 - Indian Kanoon API use must be reviewed against its ToS.
 - HLDC must be proven excluded from commercial-safe retrieval.
-- POCSO/rape/minor redaction rules must be implemented and tested.
+- POCSO/rape/minor redaction rules must be implemented and tested. **(Phase 5 — pending.)**
 
