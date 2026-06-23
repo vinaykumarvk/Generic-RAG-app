@@ -60,6 +60,12 @@ def attempt_to_case_status(source_name: str, outcome: str) -> str:
     """Map a source attempt outcome to the case-level text status."""
 
     if outcome == "hit":
+        # Stage 1 only stores the raw artifact; Stage 2 processing promotes the
+        # case to 'text_ready'. A hit therefore lands in a per-source stored state.
+        if source_name == "ecourts":
+            return "ecourts_hit"
+        if source_name == "indian_kanoon":
+            return "ik_hit"
         return "text_ready"
     if outcome == "miss" and source_name == "indian_kanoon":
         return "ik_miss"

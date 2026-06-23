@@ -53,7 +53,8 @@ export function App() {
         <Route path="/workspace/:workspaceId/query" element={<Suspense fallback={<PageLoader />}><QueryPage /></Suspense>} />
         <Route path="/workspace/:workspaceId/graph" element={<Suspense fallback={<PageLoader />}><GraphExplorerPage /></Suspense>} />
         <Route path="/workspace/:workspaceId/analytics" element={<Suspense fallback={<PageLoader />}><AnalyticsPage /></Suspense>} />
-        <Route path="/workspace/:workspaceId/district-analytics" element={<Suspense fallback={<PageLoader />}><DistrictAnalyticsPage /></Suspense>} />
+        <Route path="/workspace/:workspaceId/district-cases" element={<Suspense fallback={<PageLoader />}><DistrictAnalyticsPage /></Suspense>} />
+        <Route path="/workspace/:workspaceId/district-analytics" element={<Navigate to="../district-cases" replace />} />
         <Route path="/admin" element={<Suspense fallback={<PageLoader />}><AdminPage /></Suspense>} />
         <Route path="/admin/users" element={<Suspense fallback={<PageLoader />}><AdminPage /></Suspense>} />
         <Route path="/admin/audit" element={<Suspense fallback={<PageLoader />}><AdminPage /></Suspense>} />

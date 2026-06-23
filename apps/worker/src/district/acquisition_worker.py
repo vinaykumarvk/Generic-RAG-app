@@ -13,8 +13,9 @@ from ..config import config
 from ..db import get_connection, get_cursor
 from ..sources.ecourts_district import ECourtsClient, next_retry_at
 from ..sources.indian_kanoon_district import IndianKanoonClient
-from .artifact_document import DistrictArtifactPayload, create_document_for_artifact
+from .artifact_document import DistrictArtifactPayload, store_fetched_artifact
 from .acquisition_queue import attempt_to_case_status
+from .rate_governor import paused_sources
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,8 @@ def poll_once(source_clients: dict[str, Any] | None = None) -> bool:
         with get_cursor(conn) as cur:
             _reclaim_stale_processing_rows(cur)
 
+            paused = sorted(paused_sources(cur))
+
             cur.execute(
                 """
                 SELECT q.district_acquisition_queue_id,
@@ -74,10 +77,12 @@ def poll_once(source_clients: dict[str, Any] | None = None) -> bool:
                 WHERE q.status IN ('pending','rate_limited')
                   AND (q.next_attempt_at IS NULL OR q.next_attempt_at <= now())
                   AND (q.locked_until IS NULL OR q.locked_until < now())
+                  AND NOT (q.source_name = ANY(%s))
                 ORDER BY q.priority DESC, q.created_at ASC
                 LIMIT 1
                 FOR UPDATE SKIP LOCKED
-                """
+                """,
+                (paused,),
             )
             row = cur.fetchone()
             if not row:
@@ -171,7 +176,7 @@ def _persist_result(row: dict[str, Any], result: Any, attempt_count: int):
 
             if outcome == "hit":
                 payload = _artifact_payload(row, result)
-                link_metadata = create_document_for_artifact(cur, row, payload)
+                link_metadata = store_fetched_artifact(cur, row, payload)
 
             next_attempt = None
             if queue_status == "rate_limited":

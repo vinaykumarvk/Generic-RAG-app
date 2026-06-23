@@ -48,7 +48,8 @@ class DistrictAcquisitionQueueTests(unittest.TestCase):
 
     def test_attempt_outcomes_map_to_case_status(self):
         self.assertEqual(attempt_to_case_status("indian_kanoon", "miss"), "ik_miss")
-        self.assertEqual(attempt_to_case_status("ecourts", "hit"), "text_ready")
+        self.assertEqual(attempt_to_case_status("ecourts", "hit"), "ecourts_hit")
+        self.assertEqual(attempt_to_case_status("indian_kanoon", "hit"), "ik_hit")
         self.assertEqual(attempt_to_case_status("ecourts", "captcha_required"), "ecourts_pending")
         self.assertEqual(attempt_to_case_status("ecourts", "captcha_failed"), "blocked")
 

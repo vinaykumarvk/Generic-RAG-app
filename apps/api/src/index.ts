@@ -33,6 +33,7 @@ import { createAuditRoutes } from "./routes/audit-routes";
 import { createIngestionRoutes } from "./routes/ingestion-routes";
 import { createDistrictSourceRoutes } from "./routes/district-source-routes";
 import { createDistrictAnalyticsRoutes } from "./routes/district-analytics-routes";
+import { createDistrictBatchRoutes } from "./routes/district-batch-routes";
 import { createWorkspaceMemberGuard } from "./middleware/workspace-guard";
 import { createStorageProvider } from "./storage";
 
@@ -396,6 +397,7 @@ async function main() {
       createIngestionRoutes(app, deps);
       createDistrictSourceRoutes(app, deps);
       createDistrictAnalyticsRoutes(app, deps);
+      createDistrictBatchRoutes(app, deps);
     },
   });
 

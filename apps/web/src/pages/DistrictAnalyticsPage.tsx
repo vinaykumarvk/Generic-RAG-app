@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { Calendar, ChevronDown, Download, RefreshCw, X } from "lucide-react";
 import { DistrictSourceDashboard } from "@/components/admin/DistrictSourceDashboard";
+import { DistrictBatchControls } from "@/components/admin/DistrictBatchControls";
 import { DistrictCaseDrilldown } from "@/components/analytics/DistrictCaseDrilldown";
 import { DistrictCaseVolumeChart } from "@/components/analytics/DistrictCaseVolumeChart";
 import { DistrictCoveragePanel } from "@/components/analytics/DistrictCoveragePanel";
@@ -102,6 +103,8 @@ export function DistrictAnalyticsPage() {
     },
   });
 
+  const [tab, setTab] = useState<"analytics" | "fetch">("analytics");
+
   if (!workspaceId) return null;
 
   const analyticsCsvUrl = buildApiUrl(`/api/v1/workspaces/${workspaceId}/district/analytics/export.csv?${queryString}`);
@@ -111,9 +114,10 @@ export function DistrictAnalyticsPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-skin-base">District Analytics</h2>
+          <h2 className="text-2xl font-bold text-skin-base">District Cases</h2>
           <p className="text-skin-muted text-sm mt-1">District-court metadata, source coverage, translation, and text readiness</p>
         </div>
+        {tab === "analytics" && (
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -139,8 +143,16 @@ export function DistrictAnalyticsPage() {
             CNR CSV
           </a>
         </div>
+        )}
       </div>
 
+      <div role="tablist" aria-label="District cases views" className="flex gap-1 border-b border-skin">
+        <button type="button" role="tab" aria-selected={tab === "analytics"} onClick={() => setTab("analytics")} className={tabClass(tab === "analytics")}>Analytics</button>
+        <button type="button" role="tab" aria-selected={tab === "fetch"} onClick={() => setTab("fetch")} className={tabClass(tab === "fetch")}>Fetch New Cases</button>
+      </div>
+
+      {tab === "analytics" && (
+        <>
       <section className="bg-surface border border-skin rounded-lg p-4">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
           <label className="space-y-1">
@@ -187,8 +199,18 @@ export function DistrictAnalyticsPage() {
 
       <DistrictSourceDashboard workspaceId={workspaceId} queryString={queryString} />
       <DistrictCaseDrilldown workspaceId={workspaceId} queryString={queryString} />
+        </>
+      )}
+
+      {tab === "fetch" && <DistrictBatchControls workspaceId={workspaceId} />}
     </div>
   );
+}
+
+function tabClass(active: boolean): string {
+  return `px-4 py-2 text-sm font-medium -mb-px border-b-2 ${
+    active ? "border-primary-600 text-skin-base" : "border-transparent text-skin-muted hover:text-skin-base"
+  }`;
 }
 
 function MultiSelect({

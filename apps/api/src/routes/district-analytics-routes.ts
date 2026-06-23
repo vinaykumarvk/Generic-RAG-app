@@ -332,7 +332,7 @@ export function createDistrictAnalyticsRoutes(app: FastifyInstance, deps: Distri
           return cached.payload;
         }
 
-        const [states, districts, optionRows] = await Promise.all([
+        const [states, districts, optionRows, years] = await Promise.all([
           queryFn(
             `SELECT
                state_code::text AS value,
@@ -401,6 +401,15 @@ export function createDistrictAnalyticsRoutes(app: FastifyInstance, deps: Distri
              ORDER BY kind, count DESC, label`,
             [workspaceId],
           ),
+          queryFn(
+            `SELECT DISTINCT EXTRACT(YEAR FROM decision_date)::int AS year
+             FROM district_case
+             WHERE workspace_id = $1
+               AND is_criminal_target = true
+               AND decision_date IS NOT NULL
+             ORDER BY year DESC`,
+            [workspaceId],
+          ),
         ]);
         const groupedOptions = groupFilterOptions(optionRows.rows);
 
@@ -414,6 +423,7 @@ export function createDistrictAnalyticsRoutes(app: FastifyInstance, deps: Distri
           dispositions: groupedOptions.disposition,
           languages: groupedOptions.language,
           sources: groupedOptions.source_name,
+          years: years.rows.map((row: { year: number }) => row.year),
         };
         filterOptionsCache.set(workspaceId, { expiresAt: Date.now() + FILTER_OPTIONS_TTL_MS, payload });
         return payload;
