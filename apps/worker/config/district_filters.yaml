@@ -129,7 +129,10 @@ source_policy:
     license_classification: commercial_safe
     create_documents: false
   ecourts:
-    enabled: true
+    # Raw-HTTP eCourts is blocked by the portal's rotating-session anti-automation
+    # (see investigation 2026-06-23). Disabled until a browser-automation fetcher
+    # lands. Re-enable once that path is proven.
+    enabled: false
     content_type: metadata_and_text
     license_classification: internal_only
     create_documents: true
@@ -137,7 +140,7 @@ source_policy:
     min_delay_ms: 3000
     max_workers: 1
   indian_kanoon:
-    enabled: false
+    enabled: true
     content_type: clean_text
     license_classification: internal_only
     create_documents: true
