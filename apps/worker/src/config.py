@@ -132,6 +132,10 @@ class Config:
 
     # eCourts automated portal acquisition (Mode 4 captcha solving — see docs/legal/captcha-strategy.md)
     ECOURTS_FETCH_ENABLED: bool = _env_bool("ECOURTS_FETCH_ENABLED", "false")
+    # Browser-automation fetch (Playwright/Chromium) — required because raw HTTP is
+    # blocked by eCourts' rotating-session anti-automation (docs/district/ecourts-browser-fetch-protocol.md)
+    ECOURTS_BROWSER_FETCH_ENABLED: bool = _env_bool("ECOURTS_BROWSER_FETCH_ENABLED", "false")
+    ECOURTS_BROWSER_HEADLESS: bool = _env_bool("ECOURTS_BROWSER_HEADLESS", "true")
     ECOURTS_BASE_URL: str = os.getenv("ECOURTS_BASE_URL", "https://services.ecourts.gov.in/ecourtindia_v6").strip().rstrip("/")
     ECOURTS_CNR_SEARCH_PATH: str = os.getenv("ECOURTS_CNR_SEARCH_PATH", "/?p=cnr_status/searchByCNR")
     ECOURTS_CAPTCHA_PATH: str = os.getenv("ECOURTS_CAPTCHA_PATH", "/vendor/securimage/securimage_show.php")

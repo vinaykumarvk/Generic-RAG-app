@@ -129,10 +129,10 @@ source_policy:
     license_classification: commercial_safe
     create_documents: false
   ecourts:
-    # Raw-HTTP eCourts is blocked by the portal's rotating-session anti-automation
-    # (see investigation 2026-06-23). Disabled until a browser-automation fetcher
-    # lands. Re-enable once that path is proven.
-    enabled: false
+    # Raw-HTTP eCourts is blocked by the portal's rotating-session anti-automation.
+    # Fetching uses the Playwright browser client, gated at runtime by
+    # ECOURTS_BROWSER_FETCH_ENABLED (see docs/district/ecourts-browser-fetch-protocol.md).
+    enabled: true
     content_type: metadata_and_text
     license_classification: internal_only
     create_documents: true

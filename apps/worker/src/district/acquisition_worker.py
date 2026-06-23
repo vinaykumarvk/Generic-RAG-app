@@ -134,7 +134,12 @@ def _fetch_source(row: dict[str, Any], source_clients: dict[str, Any]):
     if source_name == "indian_kanoon":
         return source_clients.get("indian_kanoon", IndianKanoonClient()).fetch_case(row)
     if source_name == "ecourts":
-        return source_clients.get("ecourts", ECourtsClient()).fetch_case(row)
+        if "ecourts" in source_clients:
+            return source_clients["ecourts"].fetch_case(row)
+        if config.ECOURTS_BROWSER_FETCH_ENABLED:
+            from ..sources.ecourts_browser import ECourtsBrowserClient
+            return ECourtsBrowserClient().fetch_case(row)
+        return ECourtsClient().fetch_case(row)
     if source_name == "hldc":
         return _blocked_result(
             "HLDC live lookup is not configured; bulk HLDC ingestion must run through the non-commercial corpus loader",

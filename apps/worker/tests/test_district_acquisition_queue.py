@@ -39,7 +39,8 @@ class DistrictAcquisitionQueueTests(unittest.TestCase):
 
         plan = plan_text_acquisition(case, self.config)
 
-        self.assertEqual([item.source_name for item in plan], ["ecourts"])
+        # Both Indian Kanoon (clean-text first) and eCourts (browser fallback) are enabled.
+        self.assertEqual([item.source_name for item in plan], ["indian_kanoon", "ecourts"])
         self.assertEqual(plan[0].requested_metadata["cnr"], "UPLU010001232018")
 
     def test_skips_non_criminal_or_completed_cases(self):

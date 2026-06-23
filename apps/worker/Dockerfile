@@ -20,6 +20,12 @@ WORKDIR /app
 COPY apps/worker/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Playwright Chromium for eCourts browser-automation fetch (gated by ECOURTS_BROWSER_FETCH_ENABLED)
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN python -m playwright install-deps chromium \
+    && python -m playwright install chromium \
+    && chmod -R a+rx /ms-playwright
+
 COPY apps/worker/src/ ./src/
 COPY apps/worker/config/ ./config/
 
