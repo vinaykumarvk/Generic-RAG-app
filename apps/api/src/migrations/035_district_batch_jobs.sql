@@ -29,5 +29,5 @@ CREATE INDEX IF NOT EXISTS idx_district_batch_job_workspace
   ON district_batch_job (workspace_id, created_at DESC);
 
 -- Track this migration
-INSERT INTO schema_migration (version, name) VALUES (34, '034_district_batch_jobs')
+INSERT INTO schema_migration (version, name) VALUES (35, '035_district_batch_jobs')
 ON CONFLICT DO NOTHING;
